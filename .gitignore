@@ -180,6 +180,12 @@ cython_debug/
 # Other
 test*
 tmp*
-caxscripts/tests.ipynb
-caxscripts/test*
 ruff.*
+
+# Shadow large files
+*.hdf5
+*.h5
+*.01
+SRANG
+SRDISTR
+SRSPEC

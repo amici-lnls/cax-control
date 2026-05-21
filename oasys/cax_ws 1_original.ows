@@ -1,17 +1,18 @@
 <?xml version='1.0' encoding='utf-8'?>
-<scheme version="2.0" title="cax_ws_original" description="" working_directory="/home/gabriel.amici/repos/cax-control/oasys" workspace_units="2">
+<scheme version="2.0" title="cax_ws_original" description="" working_directory="/home/amici/repos/cax-control/oasys" workspace_units="2">
 	<nodes>
 		<node id="0" name="Bending Magnet" qualified_name="orangecontrib.shadow.widgets.sources.ow_bending_magnet.BendingMagnet" project_name="OASYS1-ShadowOui" version="" title="Bending Magnet" position="(83.0, 394.0)" />
 		<node id="1" name="Toroidal Mirror" qualified_name="orangecontrib.shadow.widgets.optical_elements.ow_toroidal_mirror.ToroidalMirror" project_name="OASYS1-ShadowOui" version="" title="Toroidal Mirror" position="(294.0, 393.0)" />
 		<node id="2" name="Plot XY" qualified_name="orangecontrib.shadow.widgets.plots.ow_plot_xy.PlotXY" project_name="OASYS1-ShadowOui" version="" title="Plot XY" position="(1098.0, 426.0)" />
 		<node id="3" name="Screen-Slits" qualified_name="orangecontrib.shadow.widgets.optical_elements.ow_screen_slits.ScreenSlits" project_name="OASYS1-ShadowOui" version="" title="Screen-Slits" position="(562.0, 403.0)" />
-		<node id="4" name="Caustic" qualified_name="orangecontrib.shadow.lnls.widgets.utility.ow_caustic_widget.CausticWidget" project_name="OASYS1-LNLS-ShadowOui" version="" title="Caustic" position="(1095.0, 332.0)" />
+		<node id="4" name="Caustic" qualified_name="orangecontrib.shadow.lnls.widgets.utility.ow_caustic_widget.CausticWidget" project_name="OASYS1-LNLS-ShadowOui" version="" title="Caustic" position="(1096.0, 331.0)" />
 		<node id="5" name="Beam Analysis" qualified_name="orangecontrib.shadow.lnls.widgets.utility.ow_beam_analysis.PlotXY" project_name="OASYS1-LNLS-ShadowOui" version="" title="Beam Analysis" position="(1099.0, 614.0)" />
 		<node id="6" name="Empty Element" qualified_name="orangecontrib.shadow.widgets.special_elements.ow_empty_element.EmptyElement" project_name="OASYS1-ShadowOui" version="" title="Empty Element" position="(717.0, 185.0)" />
 		<node id="7" name="Info" qualified_name="orangecontrib.shadow.widgets.plots.ow_info.Info" project_name="OASYS1-ShadowOui" version="" title="Info" position="(1098.0, 524.0)" />
 		<node id="8" name="Empty Element" qualified_name="orangecontrib.shadow.widgets.special_elements.ow_empty_element.EmptyElement" project_name="OASYS1-ShadowOui" version="" title="Empty Element" position="(431.0, 199.0)" />
-		<node id="9" name="Plot XY" qualified_name="orangecontrib.shadow.widgets.plots.ow_plot_xy.PlotXY" project_name="OASYS1-ShadowOui" version="" title="Plot XY" position="(719.0, 523.0)" />
-		<node id="10" name="Info" qualified_name="orangecontrib.shadow.widgets.plots.ow_info.Info" project_name="OASYS1-ShadowOui" version="" title="Info" position="(696.0, 645.0)" />
+		<node id="9" name="Plot XY" qualified_name="orangecontrib.shadow.widgets.plots.ow_plot_xy.PlotXY" project_name="OASYS1-ShadowOui" version="" title="Plot XY" position="(757.0, 408.0)" />
+		<node id="10" name="Info" qualified_name="orangecontrib.shadow.widgets.plots.ow_info.Info" project_name="OASYS1-ShadowOui" version="" title="Info" position="(751.0, 620.0)" />
+		<node id="11" name="Beam Analysis" qualified_name="orangecontrib.shadow.lnls.widgets.utility.ow_beam_analysis.PlotXY" project_name="OASYS1-LNLS-ShadowOui" version="" title="Beam Analysis" position="(776.0, 516.0)" />
 	</nodes>
 	<links>
 		<link id="0" source_node_id="0" sink_node_id="1" source_channel="Beam" sink_channel="Input Beam" enabled="true" />
@@ -23,7 +24,7 @@
 		<link id="6" source_node_id="1" sink_node_id="8" source_channel="Beam" sink_channel="Input Beam" enabled="true" />
 		<link id="7" source_node_id="8" sink_node_id="3" source_channel="Beam" sink_channel="Input Beam" enabled="true" />
 		<link id="8" source_node_id="3" sink_node_id="9" source_channel="Beam" sink_channel="Input Beam" enabled="true" />
-		<link id="9" source_node_id="3" sink_node_id="10" source_channel="Beam" sink_channel="Input Beam" enabled="true" />
+		<link id="9" source_node_id="3" sink_node_id="11" source_channel="Beam" sink_channel="Input Beam" enabled="true" />
 	</links>
 	<annotations />
 	<thumbnail />
@@ -31,7 +32,7 @@
 		<properties node_id="0" format="pickle">gASVUwMAAAAAAAB9lCiMFmNhbGN1bGF0aW9uX21vZGVfY29tYm+USwCMFWRpc3RhbmNlX2Zyb21f
 d2Fpc3RfeJRHAAAAAAAAAACMFWRpc3RhbmNlX2Zyb21fd2Fpc3RfepRHAAAAAAAAAACMBWVfbWF4
 lEdAxXyAAAAAAIwFZV9taW6UR0DFe4AAAAAAjAtlbWl0dGFuY2VfeJRHPpDG96C17Y2MC2VtaXR0
-YW5jZV96lEc+JXmO4jCMOowGZW5lcmd5lEdACAAAAAAAAIwRZmlsZV90b193cml0ZV9vdXSUSwCM
+YW5jZV96lEc+JXmO4jCMOowGZW5lcmd5lEdACAAAAAAAAIwRZmlsZV90b193cml0ZV9vdXSUSwGM
 G2dlbmVyYXRlX3BvbGFyaXphdGlvbl9jb21ib5RLAowfaG9yaXpvbnRhbF9oYWxmX2RpdmVyZ2Vu
 Y2VfZnJvbZRHPyo24uscQy2MHWhvcml6b250YWxfaGFsZl9kaXZlcmdlbmNlX3RvlEc/Kjbi6xxD
 LYwQaXNfYXV0b21hdGljX3J1bpSIjA5tYWduZXRpY19maWVsZJRHP+IN7SiM5wSMD21hZ25ldGlj
@@ -41,7 +42,7 @@ bGZfZGl2ZXJnZW5jZV90b5RHP/AAAAAAAACMDm51bWJlcl9vZl9yYXlzlEpAQg8AjBJvcHRpbWl6
 ZV9maWxlX25hbWWUjA5OT05FIFNQRUNJRklFRJSMD29wdGltaXplX3NvdXJjZZRLAIwZc2FtcGxl
 X2Rpc3RyaWJ1dGlvbl9jb21ib5RLAIwTc2F2ZWRXaWRnZXRHZW9tZXRyeZSMA3NpcJSMDl91bnBp
 Y2tsZV90eXBllJOUjAxQeVF0NS5RdENvcmWUjApRQnl0ZUFycmF5lENCAdnQywADAAAAAAFeAAAA
-7wAABoUAAAOqAAABXgAAAO8AAAaFAAADqgAAAAAAAAAAB4AAAAFeAAAA7wAABoUAAAOqlIWUh5RS
+7wAABoUAAAOqAAABXgAAAO8AAAaFAAADqgAAAAAAAAAABoYAAAFeAAAA7wAABoUAAAOqlIWUh5RS
 lIwEc2VlZJRLAYwHc2lnbWFfeJRHP5RgqmTC+DiMB3NpZ21hX3qURz+HjU/fO2RajAl2aWV3X3R5
 cGWUSwB1Lg==
 </properties>
@@ -128,8 +129,8 @@ bmVzX2FuZ2xllEcAAAAAAAAAAIwUcmVmbGVjdGlvbl9hbmdsZV9kZWeURz/xN0vGp++ejBVyZWZs
 ZWN0aW9uX2FuZ2xlX21yYWSUaIOMEXJlZmxlY3Rpdml0eV90eXBllEsAjCByZWZyYWN0aXZlX2lu
 ZGV4X2luX2ltYWdlX21lZGl1bZRHAAAAAAAAAACMIXJlZnJhY3RpdmVfaW5kZXhfaW5fb2JqZWN0
 X21lZGl1bZRHAAAAAAAAAACME3NhdmVkV2lkZ2V0R2VvbWV0cnmUjANzaXCUjA5fdW5waWNrbGVf
-dHlwZZSTlIwMUHlRdDUuUXRDb3JllIwKUUJ5dGVBcnJheZRDQgHZ0MsAAwAAAAAAAAAAACAAAAd/
-AAAErwAAAV4AAACeAAAGhQAAA1kAAAAAAgAAAAeAAAAAAAAAAEUAAAd/AAAEr5SFlIeUUpSMD3Nl
+dHlwZZSTlIwMUHlRdDUuUXRDb3JllIwKUUJ5dGVBcnJheZRDQgHZ0MsAAwAAAAABXgAAAJ4AAAaF
+AAADWQAAAV4AAACeAAAGhQAAA1kAAAAAAgAAAAaGAAABXgAAAJ4AAAaFAAADWZSFlIeUUpSMD3Nl
 ZWRfZm9yX21vc2FpY5RKi8buYIwRc2xpdF9jZW50ZXJfeGF4aXOURwAAAAAAAAAAjBFzbGl0X2Nl
 bnRlcl96YXhpc5RHAAAAAAAAAACMEXNsaXRfaGVpZ2h0X3pheGlzlEcAAAAAAAAAAIwQc2xpdF93
 aWR0aF94YXhpc5RHAAAAAAAAAACMFXNtX2FuZ2xlX29mX2luY2lkZW5jZZRHAAAAAAAAAACMF3Nt
@@ -549,8 +550,27 @@ aW6URwAAAAAAAAAAjA55X2NvbHVtbl9pbmRleJRLAowHeV9yYW5nZZRLAIwLeV9yYW5nZV9tYXiU
 RwAAAAAAAAAAjAt5X3JhbmdlX21pbpRHAAAAAAAAAAB1Lg==
 </properties>
 		<properties node_id="10" format="pickle">gASVmgAAAAAAAAB9lIwTc2F2ZWRXaWRnZXRHZW9tZXRyeZSMA3NpcJSMDl91bnBpY2tsZV90eXBl
-lJOUjAxQeVF0NS5RdENvcmWUjApRQnl0ZUFycmF5lENCAdnQywADAAAAAALQAAAA/AAABoUAAAOq
-AAAC0AAAASEAAAaFAAADqgAAAAAAAAAAB4AAAALQAAABIQAABoUAAAOqlIWUh5RSlHMu
+lJOUjAxQeVF0NS5RdENvcmWUjApRQnl0ZUFycmF5lENCAdnQywADAAAAAALQAAABIQAABoUAAAOq
+AAAC0AAAASEAAAaFAAADqgAAAAAAAAAABoYAAALQAAABIQAABoUAAAOqlIWUh5RSlHMu
+</properties>
+		<properties node_id="11" format="pickle">gASVxQMAAAAAAAB9lCiMDmNhcnRlc2lhbl9heGlzlEsBjANjdXSUSwCMB2ZpdFR5cGWUSwGMDGZ3
+aG1faW50X2V4dJRLAIwRZndobV9vdmVyc2FtcGxpbmeUR0BpAAAAAAAAjA5md2htX3RocmVzaG9s
+ZJRHP+AAAAAAAACMD2dhdXNzaWFuX2ZpbHRlcpRLAIwFZ3JheXOUjAI5MZSMCWhvcl9sYWJlbJSM
+AJSMC2ltYWdlX3BsYW5llEsBjBhpbWFnZV9wbGFuZV9uZXdfcG9zaXRpb26UR8BZAAAAAAAAjBxp
+bWFnZV9wbGFuZV9yZWxfYWJzX3Bvc2l0aW9ulEsBjAhpbnRlZ3JhbJSMAzAuMJSMBWludGVulIwF
+OTEuMDCUjAhpbnZlcnRYWZRLAIwQaXNfYXV0b21hdGljX3J1bpSIjBRpc19jb252ZXJzaW9uX2Fj
+dGl2ZZRLAYwFbHJheXOUjAY5OTk5MDmUjAVucmF5c5SMBzEwMDAwMDCUjA9udW1iZXJfb2ZfYmlu
+c1iUS2SMD251bWJlcl9vZl9iaW5zWZRLZIwSb3V0cHV0X2RhdGZpbGVuYW1llIwTZGVmYXVsdF9o
+aXN0bzJELmRhdJSMD291dHB1dF9maWxlbmFtZZSMC2RlZmF1bHQucG5nlIwQcGxvdF96ZXJvUGFk
+ZGluZ5RLAIwJcGxvdHRpdGxllIwFVGl0bGWUjARyYXlzlEsBjBNzYXZlZFdpZGdldEdlb21ldHJ5
+lIwDc2lwlIwOX3VucGlja2xlX3R5cGWUk5SMDFB5UXQ1LlF0Q29yZZSMClFCeXRlQXJyYXmUQ0IB
+2dDLAAMAAAAAAV4AAADvAAAGhQAAA6oAAAFeAAAA7wAABoUAAAOqAAAAAAAAAAAGhgAAAV4AAADv
+AAAGhQAAA6qUhZSHlFKUjAVzY2FsZZRLAIwFdGV4dEGUSwWMBXRleHRClEsKjAV0ZXh0Q5RLAIwK
+dmVydF9sYWJlbJRoC4wTd2VpZ2h0X2NvbHVtbl9pbmRleJRLF4wOeF9jb2x1bW5faW5kZXiUSwKM
+CXhfY3V0X3Bvc5RHAAAAAAAAAACMB3hfcmFuZ2WUSwCMC3hfcmFuZ2VfbWF4lEcAAAAAAAAAAIwL
+eF9yYW5nZV9taW6URwAAAAAAAAAAjA55X2NvbHVtbl9pbmRleJRLAIwJeV9jdXRfcG9zlEcAAAAA
+AAAAAIwHeV9yYW5nZZRLAIwLeV9yYW5nZV9tYXiURwAAAAAAAAAAjAt5X3JhbmdlX21pbpRHAAAA
+AAAAAAB1Lg==
 </properties>
 	</node_properties>
 </scheme>

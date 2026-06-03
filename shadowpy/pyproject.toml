@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shadowpy"
+version = "0.1.0"
+description = "A cleaner Shadow interface in Python"
+authors = [{ name = "Gabriel A. Amici" }]
+dependencies = []
+
+[tool.setuptools]
+packages = ["shadowpy"]

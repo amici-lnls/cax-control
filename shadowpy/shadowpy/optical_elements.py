@@ -105,6 +105,8 @@ class OpticalElement:
         self.shadow_oe.OFFY = offset_local[1]
         self.shadow_oe.OFFZ = offset_local[2]
 
+        self.update()  # Update the element after changing the offset
+
     @property
     def tilt(self):
         """

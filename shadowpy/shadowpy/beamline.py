@@ -31,7 +31,8 @@ class BeamLine:
         self.save_image(self.source, self.beam)
 
         # List to hold beams at each stage of the beamline
-        self.beams = [self.beam.duplicate()]  
+        self.beams = list([None for _ in range(len(self.elements)+1)])  
+        self.beams[0] = self.beam.duplicate() 
 
     def initialize_elements(self):
         """
@@ -97,10 +98,10 @@ class BeamLine:
             self.beam.traceOE(element.shadow_oe, i+1)
             
             # Store the beam after each element
-            self.beams.append(self.beam.duplicate())
+            self.beams[i+1] = self.beam.duplicate()
 
             # Save the image after each element
-            self.save_image(element, self.beams[-1])
+            self.save_image(element, self.beams[i+1])
 
     def trace(self):
         """
@@ -122,7 +123,8 @@ class BeamLine:
             element = self.elements[i]
             
             # Get the current beam before tracing through the element
-            current_beam = self.beams[i]
+            current_beam = self.beams[i].duplicate()
+            element.reset()  # Reset the element to apply any new parameters
 
             current_beam.traceOE(element.shadow_oe, i+1)
 
@@ -131,3 +133,6 @@ class BeamLine:
             
             # Update the beam after each element
             self.beams[i+1] = current_beam.duplicate()
+            
+            # Free memory of the current beam since we have saved it in the list
+            del current_beam  

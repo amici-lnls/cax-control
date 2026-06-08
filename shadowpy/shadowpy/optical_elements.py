@@ -161,7 +161,8 @@ class OpticalElement:
         # Clear the image since the element has changed
         self.image = None  
         # Retrace the beamline to update the beam with the new element 
-        self.beamline.trace()  
+        if self.beamline is not None:
+            self.beamline.trace()  
 
     def load_specification(self, specification_file: str = None):
         """

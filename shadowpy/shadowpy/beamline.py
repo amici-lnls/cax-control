@@ -68,7 +68,7 @@ class BeamLine:
             element.beamline = self
 
 
-    def save_image(self, element, beam: Shadow.Beam, nbins=200):
+    def save_image(self, element, beam: Shadow.Beam, nbins=150):
         """
         Save the image of the beam after passing through an optical element.
         """
@@ -125,7 +125,7 @@ class BeamLine:
             # Get the current beam before tracing through the element
             current_beam = self.beams[i].duplicate()
             element.reset()  # Reset the element to apply any new parameters
-
+            print(element.offset)
             current_beam.traceOE(element.shadow_oe, i+1)
 
             # Save the image after each element

@@ -8,7 +8,7 @@ import numpy as np
 from .optical_elements import OpticalElement
 from.sources import Source
 from .utils import rotation_matrix, ReferenceFrame
-
+from caxscripts.image_statistics import Histogram2DAnalyzer
 
 class BeamLine:
     """
@@ -68,7 +68,7 @@ class BeamLine:
             element.beamline = self
 
 
-    def save_image(self, element, beam: Shadow.Beam, nbins=150):
+    def save_image(self, element, beam: Shadow.Beam, nbins=200):
         """
         Save the image of the beam after passing through an optical element.
         """
@@ -85,9 +85,19 @@ class BeamLine:
         image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
                                    nbins=nbins, nolost=1)
         
-        # For now I'll simply set the element's image to the histogram ticket, 
-        # but this could be modified to save extra information.
-        element.image = image_ticket
+        histogram = image_ticket["histogram"]
+        bin_h_edges = image_ticket["bin_h_edges"]
+        bin_v_edges = image_ticket["bin_v_edges"]
+
+        # We instantiate the analyzer to compute the image statistics, 
+        # used for fitting the beam profile and computing the beam size.
+        ana = Histogram2DAnalyzer(img=histogram, 
+                                  xedges=bin_h_edges, 
+                                  yedges=bin_v_edges)
+        ana.compute_moments()
+        ana.fit(hprm=ana.hprm_mom, useroi=True)
+        # Set element image to the analyzer, used for fitting and plotting
+        element.image = ana
 
     def full_trace(self):
         """
@@ -112,7 +122,6 @@ class BeamLine:
         # To check which element was modified, we check if its image is None, 
         # which means it has been wiped since the last trace. We then trace 
         # from the first modified element.
-
         start_index = 0
         for i, element in enumerate(self.elements):
             if element.image is None:
@@ -125,7 +134,8 @@ class BeamLine:
             # Get the current beam before tracing through the element
             current_beam = self.beams[i].duplicate()
             element.reset()  # Reset the element to apply any new parameters
-            print(element.offset)
+  
+            # Trace the beam through the current element
             current_beam.traceOE(element.shadow_oe, i+1)
 
             # Save the image after each element

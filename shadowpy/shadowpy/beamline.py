@@ -9,6 +9,54 @@ from .optical_elements import OpticalElement
 from.sources import Source
 from .utils import rotation_matrix, ReferenceFrame
 from caxscripts.image_statistics import Histogram2DAnalyzer
+import os
+import sys
+import contextlib
+
+import os
+import sys
+import contextlib
+
+@contextlib.contextmanager
+def silence_c_libs():
+    # 1. Flush Python's buffers to make sure order stays clean
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    # 2. Save a duplicate copy of the original OS file descriptors (1 and 2)
+    saved_stdout_fd = os.dup(1)
+    saved_stderr_fd = os.dup(2)
+
+    # 3. Open the null device
+    devnull = os.open(os.devnull, os.O_WRONLY)
+
+    try:
+        # 4. Force System FD 1 and 2 to point to /dev/null
+        # This completely kills all C/Fortran printf outputs
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+
+        # 5. Point Python's high-level sys.stdout to the SAVED stream copy.
+        # This allows YOUR explicit python print() statements to keep working!
+        original_stdout_stream = os.fdopen(saved_stdout_fd, 'w')
+        sys.stdout = original_stdout_stream
+
+        yield original_stdout_stream
+    finally:
+        # 6. Restore system behavior back to normal when exiting the block
+        sys.stdout.flush()
+        os.dup2(saved_stdout_fd, 1)
+        os.dup2(saved_stderr_fd, 2)
+
+        # 7. Reset Python streams back to default system references
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+
+        # Clean up stray handles
+        os.close(devnull)
+        os.close(saved_stdout_fd)
+        os.close(saved_stderr_fd)
+
 
 class BeamLine:
     """
@@ -27,7 +75,11 @@ class BeamLine:
         self.initialize_elements()
 
         # Initialize the source and save the initial image
-        self.beam.genSource(self.source.shadow_oe)
+
+        with silence_c_libs():
+            self.beam.genSource(self.source.shadow_oe)
+            print("AAAA"*20)
+
         self.save_image(self.source, self.beam)
 
         # List to hold beams at each stage of the beamline
@@ -91,11 +143,11 @@ class BeamLine:
 
         # We instantiate the analyzer to compute the image statistics, 
         # used for fitting the beam profile and computing the beam size.
-        ana = Histogram2DAnalyzer(img=histogram, 
-                                  xedges=bin_h_edges, 
-                                  yedges=bin_v_edges)
-        ana.compute_moments()
-        ana.fit(hprm=ana.hprm_mom, useroi=True)
+        ana = Histogram2DAnalyzer(img=histogram,
+                                  x_bin_edges=bin_h_edges,
+                                  y_bin_edges=bin_v_edges)
+        ana.compute_momenta()
+        ana.fit(hprm=ana.hprm_momenta, useroi=True)
         # Set element image to the analyzer, used for fitting and plotting
         element.image = ana
 
@@ -136,7 +188,9 @@ class BeamLine:
             element.reset()  # Reset the element to apply any new parameters
   
             # Trace the beam through the current element
-            current_beam.traceOE(element.shadow_oe, i+1)
+            with silence_c_libs():
+                current_beam.traceOE(element.shadow_oe, i+1)
+            print(f"Traced through element {element.name} at index {i+1}")
 
             # Save the image after each element
             self.save_image(element, current_beam)

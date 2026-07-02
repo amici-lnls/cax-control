@@ -149,6 +149,83 @@ class OpticalElement:
         # Update the element after changing the tilt angles
         self.update()
 
+    @property
+    def tx(self):
+        """
+        Global X offset
+        """
+        return self.offset[0]
+    
+    @tx.setter
+    def tx(self, value):
+        offset = self.offset
+        offset[0] = value
+        self.offset = offset
+
+    @property
+    def ty(self):
+        """
+        Global Y offset
+        """
+        return self.offset[1]
+    
+    @ty.setter
+    def ty(self, value):
+        offset = self.offset
+        offset[1] = value
+        self.offset = offset
+
+    @property
+    def tz(self):
+        """
+        Global Z offset
+        """
+        return self.offset[2]
+    
+    @tz.setter
+    def tz(self, value):
+        offset = self.offset
+        offset[2] = value
+        self.offset = offset
+
+    @property
+    def rx(self):
+        """
+        Global X tilt angle (degrees)
+        """
+        return self.tilt[0]
+
+    @rx.setter
+    def rx(self, value):
+        tilt = self.tilt
+        tilt[0] = value
+        self.tilt = tilt
+
+    @property
+    def ry(self):
+        """
+        Global Y tilt angle (degrees)
+        """
+        return self.tilt[1]
+
+    @ry.setter
+    def ry(self, value):
+        tilt = self.tilt
+        tilt[1] = value
+        self.tilt = tilt
+
+    @property
+    def rz(self):
+        """
+        Global Z tilt angle (degrees)
+        """
+        return self.tilt[2]
+
+    @rz.setter
+    def rz(self, value):
+        tilt = self.tilt
+        tilt[2] = value
+        self.tilt = tilt
 
     def update(self):
         """

@@ -6,6 +6,12 @@ import Shadow
 import numpy as np
 import os
 import sys
+from pathlib import Path
+
+# Repository root folder to load specification files
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SPECS_DIR = str(REPO_ROOT / "specs")
+
 
 # Utilize the cax-scripts repository for additional functionality
 # sys.path.append(os.path.expanduser("~/repos/cax-scripts"))
@@ -32,14 +38,17 @@ class CAXSim(BeamLine):
 
     def __init__(self, total_rays: int = 100000):
         # Initialize the elements
-        source = BendingMagnet("B1", "../../specs/source.txt")
+
+
         
+        source = BendingMagnet("B1", f"{SPECS_DIR}/source.txt")
+
         self.mirror = ToroidalMirror(name="M1", 
-                                     specification_file="specs/mirror.txt")
+                                     specification_file=f"{SPECS_DIR}/mirror.txt")
         self.dvf_A1 = Slits(name="DVF_A1", 
-                            specification_file="specs/slits.txt")
+                            specification_file=f"{SPECS_DIR}/slits.txt")
         self.dvf_B1 = Screen(name="DVF_B1", 
-                            specification_file="specs/screen.txt")
+                            specification_file=f"{SPECS_DIR}/screen.txt")
         beam = Shadow.Beam()
         
         source.shadow_oe.NPOINT = total_rays

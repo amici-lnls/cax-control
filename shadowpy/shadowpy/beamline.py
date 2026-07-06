@@ -78,7 +78,6 @@ class BeamLine:
 
         with silence_c_libs():
             self.beam.genSource(self.source.shadow_oe)
-            print("AAAA"*20)
 
         self.save_image(self.source, self.beam)
 
@@ -190,7 +189,7 @@ class BeamLine:
             # Trace the beam through the current element
             with silence_c_libs():
                 current_beam.traceOE(element.shadow_oe, i+1)
-            print(f"Traced through element {element.name} at index {i+1}")
+            print(f"Traced through element {i+1}: {element.name}")
 
             # Save the image after each element
             self.save_image(element, current_beam)

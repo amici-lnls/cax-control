@@ -186,6 +186,7 @@ ruff.*
 *.hdf5
 *.h5
 *.01
+*.dat
 SRANG
 SRDISTR
 SRSPEC

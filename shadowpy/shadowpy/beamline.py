@@ -7,7 +7,7 @@ import Shadow
 import numpy as np
 from .optical_elements import OpticalElement
 from.sources import Source
-from .utils import rotation_matrix, ReferenceFrame
+from .utils import rotation_matrix, ReferenceFrame, save_image
 from caxscripts.image_statistics import Histogram2DAnalyzer
 import os
 import sys
@@ -79,7 +79,7 @@ class BeamLine:
         with silence_c_libs():
             self.beam.genSource(self.source.shadow_oe)
 
-        self.save_image(self.source, self.beam)
+        self.source.image = save_image(self.source, self.beam)
 
         # List to hold beams at each stage of the beamline
         self.beams = list([None for _ in range(len(self.elements)+1)])  
@@ -119,37 +119,6 @@ class BeamLine:
             element.beamline = self
 
 
-    def save_image(self, element, beam: Shadow.Beam, nbins=200):
-        """
-        Save the image of the beam after passing through an optical element.
-        """
-        lab_x = np.array([1, 0, 0])  #Lab x direction
-        lab_y = np.array([0, 1, 0])  #Lab y direction
-
-        local_x = element.frame.vector_from_lab(lab_x)
-        local_y = element.frame.vector_from_lab(lab_y)
-
-        # 1 = x, 2 = y, 3 = z
-        x_index = np.argmax(np.abs(local_x))+1 
-        y_index = np.argmax(np.abs(local_y))+1
-
-        image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
-                                   nbins=nbins, nolost=1)
-        
-        histogram = image_ticket["histogram"]
-        bin_h_edges = image_ticket["bin_h_edges"]
-        bin_v_edges = image_ticket["bin_v_edges"]
-
-        # We instantiate the analyzer to compute the image statistics, 
-        # used for fitting the beam profile and computing the beam size.
-        ana = Histogram2DAnalyzer(img=histogram,
-                                  x_bin_edges=bin_h_edges,
-                                  y_bin_edges=bin_v_edges)
-        ana.compute_momenta()
-        ana.fit(hprm=ana.hprm_momenta, useroi=True)
-        # Set element image to the analyzer, used for fitting and plotting
-        element.image = ana
-
     def full_trace(self):
         """
         Trace the beam through the whole beamline.
@@ -162,7 +131,7 @@ class BeamLine:
             self.beams[i+1] = self.beam.duplicate()
 
             # Save the image after each element
-            self.save_image(element, self.beams[i+1])
+            element.image = save_image(element, self.beams[i+1])
 
     def trace(self):
         """
@@ -192,8 +161,9 @@ class BeamLine:
             print(f"Traced through element {i+1}: {element.name}")
 
             # Save the image after each element
-            self.save_image(element, current_beam)
-            
+            element.image = save_image(element, current_beam)
+            # Update the element's beam
+            element.beam = current_beam.duplicate()  
             # Update the beam after each element
             self.beams[i+1] = current_beam.duplicate()
             

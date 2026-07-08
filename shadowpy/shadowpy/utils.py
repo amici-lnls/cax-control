@@ -3,6 +3,9 @@ Module containing utility functions for the ShadowPy package.
 """
 
 import numpy as np
+# from .optical_elements import OpticalElement
+from caxscripts.image_statistics import Histogram2DAnalyzer
+import Shadow
 
 def rotation_matrix(axis, angle):
     """
@@ -140,3 +143,36 @@ class ReferenceFrame:
             f"ReferenceFrame(name={self.name}, "
             f"origin={self.origin})"
         )
+    
+# ==== BEAM IMAGE SAVING FUNCTION ====
+
+def save_image(element, beam: Shadow.Beam, nbins=200):
+        """
+        Save the image of the beam after passing through an optical element.
+        """
+        lab_x = np.array([1, 0, 0])  #Lab x hat
+        lab_y = np.array([0, 1, 0])  #Lab y hat
+
+        local_x = element.frame.vector_from_lab(lab_x)
+        local_y = element.frame.vector_from_lab(lab_y)
+
+        # 1 = x, 2 = y, 3 = z
+        x_index = np.argmax(np.abs(local_x))+1 
+        y_index = np.argmax(np.abs(local_y))+1
+
+        image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
+                                   nbins=nbins, nolost=1)
+        
+        histogram   = image_ticket["histogram"]
+        bin_h_edges = image_ticket["bin_h_edges"]
+        bin_v_edges = image_ticket["bin_v_edges"]
+
+        # We instantiate the analyzer to compute the image statistics, 
+        # used for fitting the beam profile and computing the beam size.
+        ana = Histogram2DAnalyzer(img=histogram,
+                                  x_bin_edges=bin_h_edges,
+                                  y_bin_edges=bin_v_edges)
+        ana.compute_momenta()
+        ana.fit(hprm=ana.hprm_momenta, useroi=True)
+        
+        return ana

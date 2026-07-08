@@ -8,6 +8,7 @@ methods for calculating the effect of the optical element on the beam.
 
 import Shadow
 import numpy as np
+from .utils import save_image
 
 class OpticalElement:
     """
@@ -294,6 +295,40 @@ class Screen(OpticalElement):
             raise ValueError(f"File {specification_file} is not"
                              f" configured for a screen: "
                              f"F_SCREEN = {self.shadow_oe.F_SCREEN}")
+    
+    def simple_caustic(self, beam: Shadow.Beam = None, 
+                       s_range: tuple = (-100, 100), 
+                       n_points: int = 10):
+        """
+        Calculate a simple caustic of the beam by tracing it through the screen 
+        at different distances.
+
+        Parameters:
+            beam: The input beam to be traced.
+            s_range (tuple): A tuple specifying the range of distances to trace the beam.
+            n_points (int): The number of points in the distance range to trace.
+
+        Returns:
+            list: A list of beams traced at different distances.
+        """
+        distances = np.linspace(s_range[0], s_range[1], n_points)
+        
+        fwhm_x, fwhm_y, intensity = [], [], []
+
+        for distance in distances:
+            # Set the screen's position based on the current distance
+
+            beam.retrace(distance)
+
+            ana = save_image(self, beam)
+
+            fwhm_x.append(ana.hprm_fitting['fwhmx'])
+            fwhm_y.append(ana.hprm_fitting['fwhmy'])
+            # intensity.append(ana.hprm_fitting['peak'])
+
+
+        
+        return np.array(distances), np.array(fwhm_x), np.array(fwhm_y)#, intensity
 
 class Slits(Screen):
     """

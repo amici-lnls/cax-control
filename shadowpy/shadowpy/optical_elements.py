@@ -9,6 +9,24 @@ methods for calculating the effect of the optical element on the beam.
 import Shadow
 import numpy as np
 from .utils import save_image
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+# Module-level globals used by _caustic_step_worker under fork context
+_worker_screen = None
+_worker_beam = None
+
+
+def _caustic_step_worker(distance):
+    beam = _worker_beam.duplicate()
+    beam.retrace(distance)
+    ana = save_image(_worker_screen, beam)
+    fwhm_x = ana.hprm_fitting['fwhmx']
+    fwhm_y = ana.hprm_fitting['fwhmy']
+    print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
+    del beam
+    return fwhm_x, fwhm_y
+
 
 class OpticalElement:
     """
@@ -296,6 +314,40 @@ class Screen(OpticalElement):
                              f" configured for a screen: "
                              f"F_SCREEN = {self.shadow_oe.F_SCREEN}")
     
+    def _caustic_step(self, beam: Shadow.Beam, distance: float):
+
+        beam_copy = beam.duplicate()
+
+        beam_copy.retrace(distance)
+
+        ana = save_image(self, beam_copy)
+
+        fwhm_x = ana.hprm_fitting['fwhmx']
+        fwhm_y = ana.hprm_fitting['fwhmy']
+        print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
+
+        del beam_copy  # Explicitly delete the duplicate beam to free memory
+
+        return fwhm_x, fwhm_y
+        
+
+    def parallel_caustic(self, beam: Shadow.Beam = None,
+                         s_range: tuple = (-100, 100),
+                         n_points: int = 10,
+                         max_workers: int = None):
+
+        global _worker_screen, _worker_beam
+        _worker_screen = self
+        _worker_beam = beam
+
+        ctx = multiprocessing.get_context('fork')
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
+            print("Calculating caustic in parallel...")
+            distances = np.linspace(s_range[0], s_range[1], n_points)
+            results = list(executor.map(_caustic_step_worker, distances))
+        print("Caustic calculation completed.")
+        return distances, np.array([r[0] for r in results]), np.array([r[1] for r in results])
+
     def simple_caustic(self, beam: Shadow.Beam = None, 
                        s_range: tuple = (-100, 100), 
                        n_points: int = 10):

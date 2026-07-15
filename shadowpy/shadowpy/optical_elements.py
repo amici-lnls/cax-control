@@ -23,7 +23,7 @@ def _caustic_step_worker(distance):
     ana = save_image(_worker_screen, beam)
     fwhm_x = ana.hprm_fitting['fwhmx']
     fwhm_y = ana.hprm_fitting['fwhmy']
-    print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
+    # print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
     del beam
     return fwhm_x, fwhm_y
 
@@ -35,7 +35,7 @@ class OpticalElement:
     """
 
     OFFSET_ATTRIBUTES = ['OFFX', 'OFFY', 'OFFZ']
-    TILT_ATTRIBUTES = ['X_ROT', 'Y_ROT', 'Z_ROT']
+    TILT_ATTRIBUTES   = ['X_ROT', 'Y_ROT', 'Z_ROT']
 
     PERSISTENT_ATTRIBUTES = OFFSET_ATTRIBUTES + TILT_ATTRIBUTES
 
@@ -324,11 +324,11 @@ class Screen(OpticalElement):
 
         fwhm_x = ana.hprm_fitting['fwhmx']
         fwhm_y = ana.hprm_fitting['fwhmy']
-        print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
 
         del beam_copy  # Explicitly delete the duplicate beam to free memory
 
         return fwhm_x, fwhm_y
+# print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
         
 
     def parallel_caustic(self, beam: Shadow.Beam = None,

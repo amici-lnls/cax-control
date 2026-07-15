@@ -1,0 +1,353 @@
+#!/bin/env python3
+
+"""CLI to control CAX mirror motors for scanning its mirror."""
+
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+
+import utils
+from h5file import HDF5File
+from shadowpy.cax_simulation import CAXSim
+import motormov as mtv
+# import sys
+
+
+# Scan types:
+# key = user choice;
+# list : menu description, PV name, device name, class name.
+SCAN_TYPES = {
+    '1' : ['Mirror x translation (Tx)',         'tx',    'mirror',
+           'CAXMirrorMove'],
+    '2' : ['Mirror x rotation    (Rx)',         'rx',    'mirror',
+           'CAXMirrorMove'],
+    '3' : ['Mirror y translation (Ty)',         'ty',    'mirror',
+           'CAXMirrorMove'],
+    '4' : ['Mirror y rotation    (Ry)',         'ry',    'mirror',
+           'CAXMirrorMove'],
+    '5' : ['Mirror z rotation    (Rz)',         'rz',    'mirror',
+           'CAXMirrorMove'],
+    '6' : ['Caustic',                           'z_pos',    'dvf_B1',
+           'CAXCausticMove'],
+}
+
+
+# The WSIZE_H/V values are used to convert pixel intervals observed by the DVF
+# into actual motor positions. They are determined by the geometry of the
+# YAG. Adjust these values if there are changes in the setup or calibration.
+# WSIZE_V, WSIZE_H = 467, 178
+
+
+def scan_menu_select():
+    """Select scan type from a menu."""
+    print("\nSelect scan (type a list of numbers separated by spaces):\n")
+    for key, value in SCAN_TYPES.items():
+        print(f"  {key} - {value[0]} scan")
+
+    scantype = list()
+    choices  = input("\n Enter choice [1-9], 'q' to quit: ")
+
+    # Quit
+    if choices.lower() == 'q':
+        print("Exiting... Done.")
+        exit(0)
+
+    if choices.lower() == '':
+        print("No choices entered. Please enter at least one choice.")
+        return scan_menu_select()  # Restart menu selection
+
+    # Validate choices and create corresponding device move instances.
+    choices = choices.strip().split()
+    for choice in choices:
+        try:
+            if choice not in SCAN_TYPES:
+                raise ValueError("Invalid choice")
+            # Keep the menu key — mapped to PV name in the main loop.
+            scantype.append(choice)
+        except Exception as err:
+            print(f"{err} -- '{choice}' "
+                " Please enter a number between 1 and 9.")
+            scan_menu_select()  # Restart menu selection
+
+    print("\n### Selected scan types:"
+          f" {', '.join(SCAN_TYPES[ch][0] for ch in scantype)}\n")
+
+    # File to record data.
+    filename = input(
+        " Enter filename base to save results"
+        " (timestamp will be included)): ")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{filename}-{timestamp}.hdf5"
+
+    return scantype, filename
+
+
+def device_picker(choice, cax):
+    """Return the device instance for the chosen scan type."""
+    class_name = SCAN_TYPES[choice][3]
+    return getattr(mtv, class_name)(cax)
+
+
+def status_show(cax):
+    """Show current status of the device."""
+    # Get current status of all devices.
+    cax_status = utils.snapshot_machine_state(cax)
+
+    # Run through all devices and print their status.
+    for key, val in cax_status.items():
+        print(f" -- {key.replace('_', ' ').upper()}:\n")
+        try:
+            for pv, vs in val.items():
+                if isinstance(vs, (int, float)):
+                    if vs < 1e-3:
+                        print(f"    * {pv:30} : {vs:1.4e}")
+                    else:
+                        print(f"    * {pv:30} : {vs:10.4f}")
+                    continue
+                elif pv == 'image':
+                    print(f"    * {pv:15} : [image data, shape = {vs.shape}]")
+                else:
+                    curr = float(vs[0])
+                    lolm = float(vs[1])
+                    hilm = float(vs[2])
+                    enbl = True if vs[3] == 1 else False
+                    print(f"    * {pv:15} :"
+                        f" {curr:10.4f},\t"
+                        f" limits = [{lolm:10.4f}, {hilm:10.4f}], \t"
+                        f" Enabled: {enbl}")
+
+                # print(f"  * {pv:12} : ", end="")
+                # enbl = True if vs[1] == 1 else False
+                # print(f"{vs[0]:12.6f}, enabled = {enbl}")
+            print("\n")
+        except Exception as err:
+            print(f" WARNING (status show) : {err}")
+            # for bl, v in val.items():
+            #     print(f"  * {bl:15} : {v}")
+    print("\n#####\n")
+
+    return cax_status
+
+
+def _ask_val(prompt, limits):
+    """Ask a question and return the answer as a float."""
+    # Repeat until a valid value is entered or the user chooses to quit.
+    while True:
+        value = input(prompt)
+        # Quit.
+        if value == 'q':
+            print("Exiting... Done.")
+            exit(0)
+
+        # Validate the input value.
+        try:
+            value = float(value)
+            if not (limits[0] <= value <= limits[1]):
+                print(f"Value must be within limits: {limits}\n")
+                continue
+            return value
+        except ValueError:
+            print("Invalid input. Please enter a numeric value.\n")
+
+
+def _general_parameters_ask(motortype, limits):
+    """Ask a question with multiple options and return the selected option."""
+    scanargs = dict()
+    scanargs['start']  = _ask_val(
+        f"Enter start {motortype} position/angle: ", limits
+        )
+    scanargs['stop']   = _ask_val(
+        f"Enter stop {motortype} position/angle: ", limits
+        )
+    scanargs['nsteps'] = int(_ask_val(
+        "Enter number of steps for scanning: ", limits=(1, float('inf'))
+        ))
+    scanargs['dtime']  = _ask_val(
+        "Enter dwell time at each position (s): ", limits=(0, float('inf'))
+        )
+    return scanargs
+
+
+# The methods below convert pixel intervals observed by the DVF
+# into actual motor positions.
+# def _top_pos_from_pixels(pixel):
+#     return -pixel * 0.01039 + 19.1
+
+
+# def _bottom_pos_from_pixels(pixel):
+#     return (pixel - WSIZE_V) * 0.01041 + 37.4
+
+
+# def _left_pos_from_pixels(pixel):
+#     return -pixel * 0.007126 + 44.3
+
+
+# def _right_pos_from_pixels(pixel):
+#     return (pixel - WSIZE_H) * 0.007126 + 46.4
+
+
+# def slit_parameters_ask(scantype: str, cax_status: dict, cax: CAXCtrl):
+#     """Get scan parameters from user."""
+#     motortype = SCAN_TYPES[scantype][1]
+#     devname   = SCAN_TYPES[scantype][2]
+#     device_mv = device_picker(scantype, cax)
+#     print(f"###\n###  {motortype} scan parameters\n###\n")
+
+#     # Open slits and show slit boundary image for reference.
+#     slit_status = utils.slit_open(device_mv, cax_status)
+#     img = utils.snapshot_dvf(cax.dvf_A1, include_imgproc=False)['image']
+#     top, bottom, left, right = utils.image_show_slit_boundary(img)
+
+#     # Get relevant parameters for the slit device.
+#     currval = {
+#         key : float(val[0])
+#         for key, val in cax_status[devname].items()
+#         }
+#     print(f" ** Current {motortype} value:")
+#     for key, val in currval.items():
+#         print(f"  - {key}: {val:10.4f}")
+
+#     for slit, vals in cax_status[devname].items():
+#         limits = (min(vals[1], vals[2]),
+#                   max(vals[1], vals[2]))
+#         print(f"\n ** {slit} slit limits:"
+#               f"   [{limits[0]:10.4f}, {limits[1]:10.4f}]")
+
+#     hsize = np.abs(right - left)
+#     vsize = np.abs(top - bottom)
+#     print("\n * Current window size: "
+#           f"{hsize:10.4f} pixels x {vsize:10.4f} pixels")
+#     # pixel_size = 0.48e-3  # mm per pixel
+
+#     scanargs = dict()
+#     scanargs['slit'] = devname
+#     scanargs['slit_initial_status'] = slit_status
+#     question = (" > Enter number of horizontal steps for scanning"
+#                 " (max = number of pixels in horizontal direction): ")
+#     n_h_windows = int(_ask_val(question, limits=(1, hsize)))
+
+#     question = (" > Enter number of vertical steps for scanning"
+#                 " (max = number of pixels in vertical direction): ")
+#     n_v_windows = int(_ask_val(question, limits=(1, vsize)))
+#     scanargs['nsteps'] = (n_h_windows, n_v_windows)
+
+#     question = (" > Superposition between windows, in %"
+#                 "(0 for no superposition): ")
+#     superp = float(_ask_val(question, limits=(0, 100))) / 100.0
+
+#     win_x = (hsize / n_h_windows) * (1 + superp)
+#     xcenter_pos_pixels = np.array([
+#         win_x * (0.5 + i * (1 - superp)) for i in range(n_h_windows)
+#         ])
+#     scanargs['left_pos']  = _left_pos_from_pixels(
+#         xcenter_pos_pixels - win_x / 2
+#         )
+#     scanargs['right_pos'] = _right_pos_from_pixels(
+#         xcenter_pos_pixels + win_x / 2
+#         )
+
+#     win_y = (vsize / n_v_windows) * (1 + superp)
+#     ycenter_pos_pixels = np.array([
+#         win_y * (0.5 + i * (1 - superp)) for i in range(n_v_windows)
+#         ])
+#     scanargs['bottom_pos'] = _bottom_pos_from_pixels(
+#         ycenter_pos_pixels + win_y / 2
+#         )
+#     scanargs['top_pos']    = _top_pos_from_pixels(
+#         ycenter_pos_pixels - win_y / 2
+#         )
+#     #
+#     scanargs['winsize'] = (win_x, win_y)
+
+#     return device_mv, scanargs
+
+
+def parameters_ask(scantype: str, cax_status: dict):
+    """Get scan parameters from user."""
+    motortype   = SCAN_TYPES[scantype][1]
+    device      = SCAN_TYPES[scantype][2]
+    print(f"###\n###  {motortype} scan parameters\n###\n")
+
+    # Other cases.
+    motorstatus = cax_status[device][motortype]
+    currval = float(motorstatus[0])
+    print(f" ** Current {motortype} value: {currval:10.4f}")
+
+    # Guarantees the order of limits for later comparison.
+    limits = (min(motorstatus[1], motorstatus[2]),
+              max(motorstatus[1], motorstatus[2]))
+    print(f" ** Parameter limits:   [{limits[0]:10.4f}, {limits[1]:10.4f}]")
+    return _general_parameters_ask(motortype, limits)
+
+
+def show_results(results, scantype: str):
+    """Show scan results."""
+    print("\n\n##### Scan Results #####\n")
+    fig, ax = plt.subplots()
+    ax.plot(results['position'], results['intensity'], marker='o')
+    ax.set_xlabel('Position/Angle (urad)')
+    ax.set_ylabel('Intensity (a.u.)')
+    dt = SCAN_TYPES[scantype]
+    ax.set_title(f'CAX {dt} Scan Results')
+    plt.grid()
+    plt.show()
+
+
+def main():
+    """Main function to run the CLI."""
+    # Current status.
+    print("\n\n#####\n##### Carcará Scanning System\n#####\n")
+
+    # Initialize control.
+    cax = CAXSim(total_rays=500000)
+
+    # Show status of devices.
+    print("\n\n\n##### Current Status of Selected Devices #####\n\n")
+    cax_status = status_show(cax)
+
+    # Select scan type.
+    scantypes, filename = scan_menu_select()
+
+    # Open HDF5 file for per-step saving.
+    h5file = HDF5File(filename, filedir='.')
+
+    print("\n##### Starting {} scan #####\n".format(
+        ", ".join(SCAN_TYPES[st][0] for st in scantypes)
+    ))
+    for choice in scantypes:
+        st = SCAN_TYPES[choice][2]
+
+        # Ask slit parameters, which has multiple parameters per slit.
+        if st == 'slit_A1' or st == 'slit_B1':
+            pass
+            # dev, scanargs = slit_parameters_ask(choice, cax_status, cax)
+        else:
+            scanargs  = parameters_ask(choice, cax_status)
+            print(
+                f"\n### Starting {SCAN_TYPES[choice]} scan with parameters:\n"
+                f" start    : {scanargs['start']:15.4f} mm,\n"
+                f" stop     : {scanargs['stop']:15.4f} mm,\n"
+                f" in       : {scanargs['nsteps']:15} steps,\n"
+                f" interval : {scanargs['dtime']:15.4f} s\n"
+                )
+
+            # Instantiate the device for the chosen scan type.
+            dev = device_picker(choice, cax)
+
+        if dev is None:
+            print(f" ERROR: No device found for scan type '{choice}'.")
+            continue
+        # Mirror scans need the motor attribute name.
+        scanargs['motor'] = SCAN_TYPES[choice][1]
+
+        # sys.exit(0)
+        # Run the scan for the device with the specified parameters.
+        # Results can be accessed by dev.results after the scan.
+        dev.device_scan(scanargs, h5file=h5file)
+
+    print(f"\nData saved to {filename}.")
+
+
+if __name__ == "__main__":
+    """."""
+    main()

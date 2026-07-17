@@ -175,4 +175,6 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         ana.compute_momenta()
         ana.fit(hprm=ana.hprm_momenta, useroi=True)
         
+        if not ana.beam_visible:
+            return None
         return ana

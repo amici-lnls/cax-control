@@ -103,10 +103,9 @@ def status_show(cax):
                         print(f"    * {pv:30} : {vs:1.4e}")
                     else:
                         print(f"    * {pv:30} : {vs:10.4f}")
-                    continue
                 elif pv == 'image':
                     print(f"    * {pv:15} : [image data, shape = {vs.shape}]")
-                else:
+                elif isinstance(vs, (list, np.ndarray)) and len(vs) == 4:
                     curr = float(vs[0])
                     lolm = float(vs[1])
                     hilm = float(vs[2])
@@ -115,10 +114,8 @@ def status_show(cax):
                         f" {curr:10.4f},\t"
                         f" limits = [{lolm:10.4f}, {hilm:10.4f}], \t"
                         f" Enabled: {enbl}")
-
-                # print(f"  * {pv:12} : ", end="")
-                # enbl = True if vs[1] == 1 else False
-                # print(f"{vs[0]:12.6f}, enabled = {enbl}")
+                elif isinstance(vs, (list, np.ndarray)):
+                    print(f"    * {pv:15} : [array, length = {len(vs)}]")
             print("\n")
         except Exception as err:
             print(f" WARNING (status show) : {err}")

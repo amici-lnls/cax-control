@@ -129,9 +129,12 @@ def snapshot_dvf(dvf, *, include_imgproc=False):
         optionally 'beam' sub-dict.
     """
     snap = {
-            # 'acq_time'      : dvf.acquisition_time,
-            # 'expo_time'     : dvf.exposure_time,
+            # 'acq_time'    : dvf.acquisition_time,
+            # 'expo_time'   : dvf.exposure_time,
             'image'         : dvf.image.img.T,
+            'x_bin_edges' : list(dvf.image.x_bin_edges),
+            'y_bin_edges' : list(dvf.image.y_bin_edges),
+            'test'          : 10800,
     }
 
     if include_imgproc:

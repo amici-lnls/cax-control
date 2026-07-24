@@ -167,7 +167,7 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         y_range = beam.get_good_range(y_index)
 
         # Discover number of bins necessary to get desired resolution
-        nbins_h, nbins_v = 320, 240
+        nbins_h, nbins_v = 280, 210
         if element.pixel_size is not None:
             nbins_h = int((x_range[1] - x_range[0])/(element.pixel_size))+1
             nbins_v = int((y_range[1] - y_range[0])/(element.pixel_size))+1
@@ -196,5 +196,6 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
                                   y_bin_edges=bin_v_edges)
         ana.compute_momenta()
         ana.fit(hprm=ana.hprm_momenta, useroi=True)
+        # print("save_image: hprm_momenta -- ", type(ana.hprm_momenta))
         
         return ana

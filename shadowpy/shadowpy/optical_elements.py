@@ -140,9 +140,9 @@ class OpticalElement:
         
         # Shadow stores X_ROT/Y_ROT/Z_ROT in radians after tracing
         tilt_local_rad = np.array([
-            self.shadow_oe.X_ROT,
-            self.shadow_oe.Y_ROT,
-            self.shadow_oe.Z_ROT
+            -self.shadow_oe.X_ROT,
+            -self.shadow_oe.Y_ROT,
+            -self.shadow_oe.Z_ROT
         ])
         
         tilt_lab_rad = self.frame.vector_to_lab(tilt_local_rad)
@@ -165,9 +165,9 @@ class OpticalElement:
         tilt_local_rad = self.frame.vector_from_lab(tilt_lab_rad)
         tilt_local_deg = np.rad2deg(tilt_local_rad)
         
-        self.shadow_oe.X_ROT = tilt_local_deg[0]
-        self.shadow_oe.Y_ROT = tilt_local_deg[1]
-        self.shadow_oe.Z_ROT = tilt_local_deg[2]
+        self.shadow_oe.X_ROT = -tilt_local_deg[0]
+        self.shadow_oe.Y_ROT = -tilt_local_deg[1]
+        self.shadow_oe.Z_ROT = -tilt_local_deg[2]
 
         self.update()
 
@@ -377,8 +377,13 @@ class Screen(OpticalElement):
 
             ana = save_image(self, beam)
 
-            fwhm_x.append(ana.hprm_fitting['fwhmx'])
-            fwhm_y.append(ana.hprm_fitting['fwhmy'])
+            if ana.beam_visible:
+                fwhm_x.append(ana.hprm_fitting['fwhmx'])
+                fwhm_y.append(ana.hprm_fitting['fwhmy'])
+            else:
+                fwhm_x.append(np.nan)
+                fwhm_y.append(np.nan)
+
             # intensity.append(ana.hprm_fitting['peak'])
 
 

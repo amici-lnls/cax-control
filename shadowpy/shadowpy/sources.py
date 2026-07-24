@@ -15,6 +15,7 @@ class Source():
         self.shadow_oe = Shadow.Source()
         self.specification_file = specification_file
         self.load_specification()
+        self.pixel_size = None
         self.frame = None  # To be set when the element is added to a beamline
     
     def load_specification(self, specification_file: str = None):

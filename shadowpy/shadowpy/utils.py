@@ -7,6 +7,8 @@ import numpy as np
 from caxscripts.image_statistics import Histogram2DAnalyzer
 import Shadow
 
+
+
 def rotation_matrix(axis, angle):
     """
     Generate a rotation matrix for a given axis and angle.
@@ -160,9 +162,29 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         x_index = np.argmax(np.abs(local_x))+1 
         y_index = np.argmax(np.abs(local_y))+1
 
+        # Get Shadow's estimate for good range in mm
+        x_range = beam.get_good_range(x_index)
+        y_range = beam.get_good_range(y_index)
+
+        # Discover number of bins necessary to get desired resolution
+        nbins_h, nbins_v = 320, 240
+        if element.pixel_size is not None:
+            nbins_h = int((x_range[1] - x_range[0])/(element.pixel_size))+1
+            nbins_v = int((y_range[1] - y_range[0])/(element.pixel_size))+1
+
+        # Use good range spans to determine if image is taller than wide
+        x_span = x_range[1] - x_range[0]
+        y_span = y_range[1] - y_range[0]
+        if y_span > x_span:
+            nbins_h, nbins_v = nbins_v, nbins_h
+
+        # Enforce 4:3 aspect ratio from the dominant (horizontal) dimension
+        nbins_v = int(nbins_h * 3 / 4)
+
         image_ticket = beam.histo2(col_h=x_index, col_v=y_index, 
+                                   nbins_h=nbins_h, nbins_v=nbins_v, 
                                    nbins=nbins, nolost=1)
-        
+
         histogram   = image_ticket["histogram"]
         bin_h_edges = image_ticket["bin_h_edges"]
         bin_v_edges = image_ticket["bin_v_edges"]
@@ -175,6 +197,4 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         ana.compute_momenta()
         ana.fit(hprm=ana.hprm_momenta, useroi=True)
         
-        if not ana.beam_visible:
-            return None
         return ana

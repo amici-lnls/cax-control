@@ -49,6 +49,7 @@ class CAXSim(BeamLine):
                             specification_file=f"{SPECS_DIR}/slits.txt")
         self.dvf_B1 = Screen(name="DVF_B1", 
                             specification_file=f"{SPECS_DIR}/screen.txt")
+        # self.dvf_B1.pixel_size = 0.48/1000 # .48 μm in mm
         beam = Shadow.Beam()
         
         source.shadow_oe.NPOINT = total_rays

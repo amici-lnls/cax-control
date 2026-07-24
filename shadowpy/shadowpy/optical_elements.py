@@ -21,8 +21,8 @@ def _caustic_step_worker(distance):
     beam = _worker_beam.duplicate()
     beam.retrace(distance)
     ana = save_image(_worker_screen, beam)
-    fwhm_x = ana.hprm_fitting['fwhmx']
-    fwhm_y = ana.hprm_fitting['fwhmy']
+    fwhm_x = ana.hprm_fitting['fwhmx'] if ana.beam_visible else np.nan
+    fwhm_y = ana.hprm_fitting['fwhmy'] if ana.beam_visible else np.nan
     # print(f"Distance: {distance:.2f}, FWHM X: {fwhm_x:.4f}, FWHM Y: {fwhm_y:.4f}")
     del beam
     return fwhm_x, fwhm_y
@@ -51,6 +51,7 @@ class OpticalElement:
         self.beamline = None
         # Image
         self.image = None
+        self.pixel_size = None
         # Persistent attributes that should not be reset after simulation
         self.persistent_attributes = self.PERSISTENT_ATTRIBUTES
         
@@ -132,40 +133,42 @@ class OpticalElement:
         Get the current tilt angles of the mirror's orientation in the global frame.
         
         Returns:
-            np.ndarray: A 3D vector representing the tilt angles (in degrees) around the lab frame axes.
+            np.ndarray: A 3D vector representing the tilt angles (in mrad) around the lab frame axes.
         """
         if self.frame is None:
-            raise ValueError("Mirror frame is not defined. Please add the mirror to a beamline first.")
+            raise ValueError(f"{self.name} frame is not defined. Please add the element to a beamline first.")
         
-        tilt_local = np.array([
+        # Shadow stores X_ROT/Y_ROT/Z_ROT in radians after tracing
+        tilt_local_rad = np.array([
             self.shadow_oe.X_ROT,
             self.shadow_oe.Y_ROT,
             self.shadow_oe.Z_ROT
         ])
         
-        return self.frame.vector_to_lab(tilt_local)
+        tilt_lab_rad = self.frame.vector_to_lab(tilt_local_rad)
+        return 1000 * tilt_lab_rad  # rad → mrad
 
     @tilt.setter
-    def tilt(self, tilt_angles: np.ndarray):
+    def tilt(self, tilt_mrad: np.ndarray):
         """
         Apply tilts to the mirror's orientation.
         
         Parameters:
-            tilt_angles (np.ndarray): A 3D vector representing the tilt angles 
-            (in degrees) around the lab frame axes.
+            tilt_mrad (np.ndarray): A 3D vector representing the tilt angles 
+            (in mrad) around the lab frame axes.
         """
         if self.frame is None:
-            raise ValueError("Mirror frame is not defined. Please add the mirror to a beamline first.")
+            raise ValueError(f"{self.name} frame is not defined. Please add the element to a beamline first.")
         
-        # Convert the tilt angles from the mirror's local frame to the lab frame
-        self.tilt_global = tilt_angles
-        self.tilt_local = self.frame.vector_from_lab(tilt_angles)
+        # mrad → rad → rotate to local frame → deg (Shadow expects degrees as input)
+        tilt_lab_rad = np.asarray(tilt_mrad) / 1000
+        tilt_local_rad = self.frame.vector_from_lab(tilt_lab_rad)
+        tilt_local_deg = np.rad2deg(tilt_local_rad)
         
-        self.shadow_oe.X_ROT = self.tilt_local[0]
-        self.shadow_oe.Y_ROT = self.tilt_local[1]
-        self.shadow_oe.Z_ROT = self.tilt_local[2]
+        self.shadow_oe.X_ROT = tilt_local_deg[0]
+        self.shadow_oe.Y_ROT = tilt_local_deg[1]
+        self.shadow_oe.Z_ROT = tilt_local_deg[2]
 
-        # Update the element after changing the tilt angles
         self.update()
 
     @property
@@ -210,40 +213,40 @@ class OpticalElement:
     @property
     def rx(self):
         """
-        Global X tilt angle (degrees)
+        Global X tilt angle (mrad)
         """
         return self.tilt[0]
 
     @rx.setter
-    def rx(self, value):
-        tilt = self.tilt
-        tilt[0] = value
+    def rx(self, value_mrad):
+        tilt = self.tilt.copy()
+        tilt[0] = value_mrad
         self.tilt = tilt
 
     @property
     def ry(self):
         """
-        Global Y tilt angle (degrees)
+        Global Y tilt angle (mrad)
         """
         return self.tilt[1]
 
     @ry.setter
-    def ry(self, value):
-        tilt = self.tilt
-        tilt[1] = value
+    def ry(self, value_mrad):
+        tilt = self.tilt.copy()
+        tilt[1] = value_mrad
         self.tilt = tilt
 
     @property
     def rz(self):
         """
-        Global Z tilt angle (degrees)
+        Global Z tilt angle (mrad)
         """
         return self.tilt[2]
 
     @rz.setter
-    def rz(self, value):
-        tilt = self.tilt
-        tilt[2] = value
+    def rz(self, value_mrad):
+        tilt = self.tilt.copy()
+        tilt[2] = value_mrad
         self.tilt = tilt
 
     def update(self):

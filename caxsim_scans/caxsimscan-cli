@@ -297,6 +297,8 @@ def main():
 
     # Initialize control.
     cax = CAXSim(total_rays=500000)
+    # cax.mirror.offset = np.array([0.1, -0.1, 0])
+    # cax.mirror.tilt   = np.array([0.1, -0.05, 0.025])
 
     # Show status of devices.
     print("\n\n\n##### Current Status of Selected Devices #####\n\n")

@@ -3,9 +3,9 @@ Module conaining wrapper classes around Shadow's Source class.
 """
 
 import Shadow
-import numpy as np
 
-class Source():
+
+class Source:
     """
     A wrapper class for a Shadow source optical element.
     """

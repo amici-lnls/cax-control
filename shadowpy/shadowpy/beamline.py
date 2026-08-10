@@ -3,19 +3,15 @@ Module containing the Beamline class, which is a wrapper for a beamline.
 It also contains some helper functions for working with the beamline.
 """
 
-import Shadow
-import numpy as np
-from .optical_elements import OpticalElement
-from.sources import Source
-from .utils import rotation_matrix, ReferenceFrame, save_image
-from caxscripts.image_statistics import Histogram2DAnalyzer
-import os
-import sys
-import contextlib
+# import contextlib
+# import os
+# import sys
 
-import os
-import sys
-import contextlib
+import numpy as np
+import Shadow
+
+from .sources import Source
+from .utils import rotation_matrix, save_image
 
 # @contextlib.contextmanager
 # def silence_c_libs():

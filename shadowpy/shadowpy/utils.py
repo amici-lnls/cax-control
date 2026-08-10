@@ -3,10 +3,10 @@ Module containing utility functions for the ShadowPy package.
 """
 
 import numpy as np
-# from .optical_elements import OpticalElement
-from caxscripts.image_statistics import Histogram2DAnalyzer
 import Shadow
 
+# from .optical_elements import OpticalElement
+from caxscripts.image_statistics import Histogram2DAnalyzer
 
 
 def rotation_matrix(axis, angle):
@@ -194,7 +194,7 @@ def save_image(element, beam: Shadow.Beam, nbins=200):
         ana = Histogram2DAnalyzer(img=histogram,
                                   x_bin_edges=bin_h_edges,
                                   y_bin_edges=bin_v_edges)
-        ana.compute_momenta()
+        ana.compute_momenta(useroi=False)
         ana.fit(hprm=ana.hprm_momenta, useroi=True)
         # print("save_image: hprm_momenta -- ", type(ana.hprm_momenta))
         

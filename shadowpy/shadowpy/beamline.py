@@ -72,17 +72,22 @@ class BeamLine:
         self.elements = optical_elements if optical_elements is not None else []
         self.beamline_frame = beamline_frame
         self.lab_frame = lab_frame
+        # Flag to indicate if the beamline has been traced 
+        # since the last modification
+        self.up_to_date = False  
         self.initialize_elements()
 
-        # Initialize the source and save the initial image
 
+        # Initialize the source and save the initial image
         # with silence_c_libs():
         self.beam.genSource(self.source.shadow_oe)
 
-        self.source.image = save_image(self.source, self.beam)
+        self.source.analyzer = save_image(self.source, self.beam)
+        self.source.up_to_date = True
+        self.source.beamline = self
 
         # List to hold beams at each stage of the beamline
-        self.beams = list([None for _ in range(len(self.elements)+1)])  
+        self.beams = [None for _ in range(len(self.elements)+1)]  
         self.beams[0] = self.beam.duplicate() 
 
     def initialize_elements(self):
@@ -144,7 +149,7 @@ class BeamLine:
         # from the first modified element.
         start_index = 0
         for i, element in enumerate(self.elements):
-            if element.image is None:
+            if not element.up_to_date:
                 start_index = i
                 break
         
@@ -161,11 +166,16 @@ class BeamLine:
             print(f"Traced through element {i+1}: {element.name}")
 
             # Save the image after each element
-            element.image = save_image(element, current_beam)
+            element.analyzer = save_image(element, current_beam)
             # Update the element's beam
             element.beam = current_beam.duplicate()  
+            # Mark the element as updated
+            element.up_to_date = True
             # Update the beam after each element
             self.beams[i+1] = current_beam.duplicate()
             
             # Free memory of the current beam since we have saved it in the list
             del current_beam  
+
+        # Mark the beamline as up-to-date after tracing all elements
+        self.up_to_date = True

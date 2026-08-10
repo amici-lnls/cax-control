@@ -6,11 +6,13 @@ class `OpticalElement`. Each class has its own specific parameters and
 methods for calculating the effect of the optical element on the beam.
 """
 
-import Shadow
-import numpy as np
-from .utils import save_image
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
+import Shadow
+
+from .utils import save_image
 
 # Module-level globals used by _caustic_step_worker under fork context
 _worker_screen = None
@@ -50,13 +52,31 @@ class OpticalElement:
         self.frame = None  
         self.beamline = None
         # Image
-        self.image = None
+        self.analyzer = None
         self.pixel_size = None
         # Persistent attributes that should not be reset after simulation
         self.persistent_attributes = self.PERSISTENT_ATTRIBUTES
+        self.up_to_date = False
         
     # General attributes    
-        
+    
+    @property
+    def image(self):
+        """
+        Analyzer instance used to characterize the element's image
+        """
+
+        if self.beamline is None:
+            raise Warning(f"Element {self.name} has not been added to a beamline."
+                          f"Add this element to a BeamLine instance to trace it.")
+
+        if not self.beamline.up_to_date: 
+            # Retrace the beamline to update the beam with the new element 
+            self.beamline.trace()
+
+        return self.analyzer
+
+
     @property
     def orientation(self):
         """
@@ -115,8 +135,13 @@ class OpticalElement:
         Parameters:
             offset_vector (np.ndarray): A 3D vector representing the offset in the mirror's local frame.
         """
+
         if self.frame is None:
             raise ValueError("Mirror frame is not defined. Please add the mirror to a beamline first.")
+
+        # Check if the new values are the same as the old ones
+        if np.isclose(offset_vector, self.offset).all():
+            return  # No change, so do nothing
         
         # Convert the offset vector from the mirror's local frame to the lab frame
         offset_local = self.frame.vector_from_lab(offset_vector)
@@ -125,7 +150,9 @@ class OpticalElement:
         self.shadow_oe.OFFY = offset_local[1]
         self.shadow_oe.OFFZ = offset_local[2]
 
-        self.update()  # Update the element after changing the offset
+        self.reset()  # Update the element after changing the offset
+        self.up_to_date = False
+        self.beamline.up_to_date = False
 
     @property
     def tilt(self):
@@ -169,7 +196,9 @@ class OpticalElement:
         self.shadow_oe.Y_ROT = -tilt_local_deg[1]
         self.shadow_oe.Z_ROT = -tilt_local_deg[2]
 
-        self.update()
+        self.reset()
+        self.up_to_date = False
+        self.beamline.up_to_date = False
 
     @property
     def tx(self):
@@ -249,20 +278,6 @@ class OpticalElement:
         tilt[2] = value_mrad
         self.tilt = tilt
 
-    def update(self):
-        """
-        Update the optical element after changing its parameters. This method 
-        should be called after modifying any parameters to ensure the changes 
-        are applied to the beamline.
-        """
-        # Reset the element to apply the new tilt angles
-        self.reset()  
-        # Clear the image since the element has changed
-        self.image = None  
-        # Retrace the beamline to update the beam with the new element 
-        if self.beamline is not None:
-            self.beamline.trace()  
-
     def load_specification(self, specification_file: str = None):
         """
         Load the optical element specification from a file.
@@ -276,6 +291,15 @@ class OpticalElement:
             specification_file = self.specification_file
         self.shadow_oe.load(specification_file)
         # self.specification = self.shadow_oe.to_dictionary()
+
+    # def update(self):
+    #     """
+    #     Update the optical element after changing its parameters. This method 
+    #     should be called after modifying any parameters to ensure the changes 
+    #     are applied to the beamline.
+    #     """
+    #     # Reset the element to apply the new tilt angles
+    #     self.reset()
 
     def reset(self):
         """

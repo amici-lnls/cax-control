@@ -16,7 +16,9 @@ class Source():
         self.specification_file = specification_file
         self.load_specification()
         self.pixel_size = None
+        self.analyzer = None  # To be set when the element is added to a beamline
         self.frame = None  # To be set when the element is added to a beamline
+        self.up_to_date = False  # Flag to indicate if the element's image is up-to-date
     
     def load_specification(self, specification_file: str = None):
         """
@@ -30,6 +32,22 @@ class Source():
         if specification_file is None:
             specification_file = self.specification_file
         self.shadow_oe.load(specification_file)
+
+    @property
+    def image(self):
+        """
+        Analyzer instance used to characterize the element's image
+        """
+
+        if self.beamline is None:
+            raise Warning(f"Element {self.name} has not been added to a beamline."
+                          f"Add this element to a BeamLine instance to trace it.")
+
+        if not self.up_to_date: 
+            # Retrace the beamline to update the beam with the new element 
+            self.beamline.trace()
+
+        return self.analyzer
 
 class BendingMagnet(Source):
     """

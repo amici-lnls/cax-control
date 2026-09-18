@@ -186,11 +186,101 @@ test*
 tmp*
 ruff.*
 
-# Shadow large files
-*.hdf5
-*.h5
-*.01
-*.dat
+# =============================================================
+# Shadow3 runtime output files
+# These are generated in the working directory whenever a
+# beamline is traced (genSource / traceOE) and are reproducible,
+# so they don't belong in version control. Safe to delete.
+# =============================================================
+
+# Beam files
+# (traced beam at each optical element)
+star.??
+
+# (initial beam before the first element)
+start.??
+begin.dat
+begin.??
+
+# (final beam after the last element)
+end.??
+
+# (duplicated initial beam)
+begin.??
+
+# Synchrotron source data
 SRANG
-SRDISTR
 SRSPEC
+SRDISTR
+SRGRID
+SRBMAG
+SRBFL
+
+# Optical element outputs
+
+# grating/crystal efficiency
+effic.??
+
+# optics cross-section data
+optax.??
+
+# screen images
+screen.??
+
+# screen histogram output
+scr.??
+
+# slits output
+slits.??
+
+# intensity distribution
+disco.??
+
+# defocused distribution
+disf.??
+
+# excluded data
+excs.??
+
+# footprint
+find.??
+
+# finess spot-profile tables
+finess.??
+
+# waiting-mode files
+wait.??
+
+# spin/orientation data
+spin.??
+
+# penetration depth
+depth.??
+
+# Bragg reflector data
+bkpref.??
+
+# mirror files
+mirr.??
+rmir.??
+
+# mirror miscut data
+miscut.??
+
+# diffraction plane files
+diffplane.??
+
+# expansion data
+expand.??
+
+# extinction data
+extinct.??
+
+# transmission (filters)
+trans.??
+
+# job files
+jobs.??
+
+# sagittal plot data
+pdis.*

@@ -17,8 +17,11 @@ import numpy as np
 import pytest
 
 sys.path.append(os.path.expanduser("~/repos/cax-control"))
+sys.path.append(os.path.expanduser("~/repos/shadowpy"))
 
+from caustic import fit_caustic_hyperbola
 from image_statistics import FWHM2SIG, Histogram2DAnalyzer
+from shadowpy.utils import Image
 
 
 HIST_RANGE = [[-8.0, 8.0], [-8.0, 8.0]]
@@ -152,3 +155,43 @@ def test_from_gaussian_is_reproducible_with_seed():
     second = Histogram2DAnalyzer.from_gaussian(bins=40, size=5_000, seed=1)
 
     np.testing.assert_array_equal(first.img, second.img)
+
+
+def test_fit_caustic_hyperbola_recovers_focus_and_waist():
+    """A weighted hyperbola fit should recover the underlying caustic."""
+    distances = np.linspace(-30.0, 30.0, 31)
+    true_d0 = 4.5
+    true_amp = 18.0
+    true_s0 = 12.0
+    widths = true_amp * np.sqrt(1.0 + ((distances - true_d0) / true_s0) ** 2)
+    sigmas = 0.25 + 0.05 * np.abs(widths)
+    rng = np.random.default_rng(7)
+    noisy = widths + rng.normal(0.0, sigmas)
+
+    params, _ = fit_caustic_hyperbola(distances, noisy, sigmas, bounds=([
+        0.0, -100.0, 1e-6
+    ], [100.0, 100.0, 1000.0]))
+
+    assert params[1] == pytest.approx(true_d0, abs=2.0)
+    assert params[0] == pytest.approx(true_amp, rel=0.15)
+    assert params[2] == pytest.approx(true_s0, rel=0.25)
+
+
+def test_image_from_ticket_accepts_missing_fwhm_values():
+    """Missing confounding FWHM metadata should not crash ticket conversion."""
+    image = Image.from_ticket({
+        "histogram": np.ones((3, 3)),
+        "bin_h_edges": np.linspace(0.0, 3.0, 4),
+        "bin_v_edges": np.linspace(0.0, 3.0, 4),
+        "bin_h_center": np.linspace(0.5, 2.5, 3),
+        "bin_v_center": np.linspace(0.5, 2.5, 3),
+        "fwhm_h": None,
+        "fwhm_v": None,
+        "fwhm_coordinates_h": None,
+        "fwhm_coordinates_v": None,
+    })
+
+    assert np.isnan(image.sigma_h)
+    assert np.isnan(image.sigma_v)
+    assert np.isnan(image.centroid_h)
+    assert np.isnan(image.centroid_v)

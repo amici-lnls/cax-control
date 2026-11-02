@@ -9,18 +9,22 @@ All functionality lives inside Histogram2DAnalyzer:
             — generate a Gaussian histogram.
 
   Quick Analysis (run on init)
-  - compute_quick()     — compute quick beam params
-                        (centroid, FWHM visibility).
+  - parameters_from_projections() — marginal-projection centroid and width.
   - beam_visible        — attribute: whether beam is visible.
-  - hprm_qck            — attribute: quick parameters dict.
+  - hprm_project        — attribute: projection parameters dict.
 
   Full Analysis
-  - compute_moments(img)   — weighted moments and principal-axis parameters.
-  - fit(hprm)              — 2D Gaussian fit via nonlinear least squares.
+  - compute_momenta(img)   — weighted moments and principal-axis parameters.
+  - fit(hprm)              — bounded 2D Gaussian fit with Poisson weights;
+                             reports parameter uncertainties and chi-square.
   - compute_threshold()    — Kapur entropy thresholding within the ROI.
 
+  Peak heights (amplitude and offset) are always reported per unit bin area,
+  i.e. counts per bin divided by bin_area. This makes them independent of
+  histogram binning.
+
   ROI
-  - compute_roi()          — rebuild the projection-derived ROI mask.
+  - compute_roi(hprm)      — rebuild the projection-derived ROI mask.
   - roi_mask               — attribute: boolean ROI mask.
   - roi_bounds             — attribute: (xmin, xmax, ymin, ymax) for plotting.
 
@@ -58,6 +62,34 @@ PEAK2AVG_THRESHOLD = 5
 # FWHM <-> sigma conversion: FWHM = f2sig * sigma
 FWHM2SIG = 2 * np.sqrt(2 * np.log(2))
 
+# ---------------------------------------------------------------------------
+# Fitting defaults.
+# ---------------------------------------------------------------------------
+
+# A Gaussian cannot be resolved below roughly one bin, so the fitter is not
+# allowed to collapse to a sub-bin spike. The floor is expressed in bins.
+SIGMA_MIN_BINS = 0.5
+
+# Correlations are kept strictly inside the unit interval so that the
+# covariance matrix remains positive definite.
+RHO_MAX = 1.0 - 1e-6
+
+# Extra padding, in bins, added to the projection-derived ROI on each side.
+DEFAULT_ROI_PAD = 2.0
+
+# Number of moment-based ROI refinements attempted before analysis continues.
+ROI_REFINE_ITERATIONS = 3
+
+# Maximum number of function evaluations for the nonlinear fit.
+FIT_MAXFEV = 20000
+
+# The fitted offset is bounded above by this many Poisson sigmas above the
+# robust background estimate, preventing the baseline from absorbing the beam.
+OFFSET_UPPER_NSIGMA = 5.0
+
+# The fitted amplitude is bounded above by this multiple of the brightest bin.
+AMPLITUDE_MAX_FACTOR = 2.0
+
 
 # ---------------------------------------------------------------------------
 # Analysis pipeline class.
@@ -67,8 +99,8 @@ FWHM2SIG = 2 * np.sqrt(2 * np.log(2))
 class Histogram2DAnalyzer:
     """Self-contained analysis pipeline for a single 2D histogram.
 
-    Stores the image, bin edges, and intermediate results (moments,
-    threshold) as instance attributes.
+    Stores the image, bin edges, and intermediate results (projection,
+    moments, fit) as instance attributes.
 
     Usage::
 
@@ -103,21 +135,25 @@ class Histogram2DAnalyzer:
         x_bin_edges=None,
         y_bin_edges=None,
         roi_sigma=5.0,
+        roi_pad=DEFAULT_ROI_PAD,
     ):
         """Initialise a 2D histogram with optional physical bin edges.
 
         Arguments:
-            img: 2D histogram array.
+            img: 2D histogram array of counts per bin. Amplitude-like
+                results are returned per unit bin area.
             x_bin_edges: optional uniform x edges; defaults to bin-index
                 coordinates from 0 to img.shape[0].
             y_bin_edges: optional uniform y edges; defaults to bin-index
                 coordinates from 0 to img.shape[1].
             droi: nonnegative integer radius, in bins, for local ROIs.
-            roi_sigma: half-width of the analysis ROI in projection sigmas.
-                Defaults to 3.0, i.e. a 3-sigma rectangular ROI.
+            roi_sigma: half-width of the analysis ROI in projected sigmas.
+                Defaults to 5.0, i.e. a 5-sigma rectangular ROI.
+            roi_pad: extra padding, in bins, added to each side of the
+                roi_sigma ROI. Defaults to DEFAULT_ROI_PAD.
 
-        Runs compute_quick() automatically to populate beam_visible
-        and hprm_qck.
+        Runs parameters_from_projections() automatically to populate
+        beam_visible and hprm_project.
         """
         self.img = np.asarray(img, dtype=float)
         if self.img.ndim != 2 or min(self.img.shape) == 0:
@@ -130,12 +166,19 @@ class Histogram2DAnalyzer:
             raise ValueError("roi_sigma must be a positive finite number.") from err
         if not np.isfinite(roi_sigma) or roi_sigma <= 0:
             raise ValueError("roi_sigma must be a positive finite number.")
+        try:
+            roi_pad = float(roi_pad)
+        except (TypeError, ValueError) as err:
+            raise ValueError("roi_pad must be a nonnegative finite number.") from err
+        if not np.isfinite(roi_pad) or roi_pad < 0:
+            raise ValueError("roi_pad must be a nonnegative finite number.")
         self.droi              = droi
         self.roi_sigma         = roi_sigma
+        self.roi_pad           = roi_pad
         self.roi_mask          = None
         self.roi_bounds        = None
-        self.beam_visible      = None  # set by compute_quick()
-        # quick params: cx, cy, fwhm_x, fwhm_y, sig_x, sig_y
+        self.beam_visible      = None  # set by parameters_from_projections()
+        # projection params: centroid, FWHM, sigma and diagonal covariance
         self.hprm_project      = None
         self.hprm_momenta      = None  # momenta params
         self.hprm_fitting      = None  # fitting params
@@ -195,47 +238,87 @@ class Histogram2DAnalyzer:
         iy = np.argmax(smooth_projection(cy_sum))
         return np.array([self.x_bin_centers[ix], self.y_bin_centers[iy]])
 
-    def _fwhm_from_projection(self, cx, cy, img=None):
-        """Estimate projection FWHM in the coordinate units of the edges.
+    @staticmethod
+    def _profile_fwhm(profile, centers):
+        """Estimate the FWHM of a one-dimensional profile.
+
+        The profile baseline is estimated from the outer tenth of each
+        side, which is robust for a beam surrounded by background. The
+        crossing points are linearly interpolated between bin centres.
 
         Args:
-            cx: x-coordinate of the beam centroid in edge-coordinate units.
-            cy: y-coordinate of the beam centroid in edge-coordinate units.
+            profile: 1D array of profile values.
+            centers: 1D array of matching bin-centre coordinates.
+
+        Returns:
+            float: FWHM in the coordinate units of ``centers``.
+        """
+        profile = np.asarray(profile, dtype=float)
+        centers = np.asarray(centers, dtype=float)
+        if profile.size < 2 or centers.size != profile.size:
+            return 0.0
+
+        edge = max(1, profile.size // 10)
+        baseline = 0.5 * (
+            np.median(profile[:edge]) + np.median(profile[-edge:])
+        )
+        values = np.clip(profile - baseline, 0.0, None)
+        peak_idx = int(np.argmax(values))
+        peak = values[peak_idx]
+        if not np.isfinite(peak) or peak <= 0:
+            return 0.0
+
+        level = 0.5 * peak
+        left = np.flatnonzero(values[:peak_idx] <= level)
+        right = np.flatnonzero(values[peak_idx + 1:] <= level)
+
+        if left.size:
+            i = left[-1]
+            x0, x1 = centers[i], centers[i + 1]
+            y0, y1 = values[i], values[i + 1]
+            xleft = (x1 if y1 == y0 else
+                     x0 + (level - y0) * (x1 - x0) / (y1 - y0))
+        else:
+            xleft = centers[0]
+
+        if right.size:
+            i = peak_idx + 1 + right[0]
+            x0, x1 = centers[i - 1], centers[i]
+            y0, y1 = values[i - 1], values[i]
+            xright = (x0 if y1 == y0 else
+                      x0 + (level - y0) * (x1 - x0) / (y1 - y0))
+        else:
+            xright = centers[-1]
+
+        return max(0.0, xright - xleft)
+
+    def _fwhm_from_projection(self, cx, cy, img=None):
+        """Estimate marginal-projection FWHM in edge-coordinate units.
+
+        The marginal projections (sums over the other axis) are used rather
+        than a single central slice. A central slice severely underestimates
+        the width of a tilted beam, which in turn makes the derived ROI too
+        small. The arguments ``cx`` and ``cy`` are accepted for API
+        compatibility.
+
+        Args:
+            cx: x-coordinate of the beam centroid (unused).
+            cy: y-coordinate of the beam centroid (unused).
             img: optional nonnegative weight array to analyze instead of
                 self.img (e.g. self.img_thresholded).
 
         Returns:
             np.array: [fwhm_x, fwhm_y] in bin-edge coordinate units.
         """
+        del cx, cy
         img = self.img if img is None else np.asarray(img, dtype=float)
-        ix = self._nearest_bin_index(cx, "x")
-        iy = self._nearest_bin_index(cy, "y")
+        if img.shape != self.img.shape:
+            raise ValueError("img must have the same shape as self.img.")
 
-        def profile_fwhm(profile, centers):
-            peak_idx = int(np.argmax(profile))
-            level = 0.5 * profile[peak_idx]
-            left = np.flatnonzero(profile[:peak_idx] <= level)
-            right = np.flatnonzero(profile[peak_idx + 1:] <= level)
-            if left.size:
-                i = left[-1]
-                x0, x1 = centers[i], centers[i + 1]
-                y0, y1 = profile[i], profile[i + 1]
-                xleft = (x1 if y1 == y0 else
-                         x0 + (level - y0) * (x1 - x0) / (y1 - y0))
-            else:
-                xleft = centers[0]
-            if right.size:
-                i = peak_idx + 1 + right[0]
-                x0, x1 = centers[i - 1], centers[i]
-                y0, y1 = profile[i - 1], profile[i]
-                xright = (x0 if y1 == y0 else
-                          x0 + (level - y0) * (x1 - x0) / (y1 - y0))
-            else:
-                xright = centers[-1]
-            return max(0.0, xright - xleft)
-
-        fwhm_x = profile_fwhm(img[:, iy], self.x_bin_centers)
-        fwhm_y = profile_fwhm(img[ix, :], self.y_bin_centers)
+        profile_x = img.sum(axis=1)
+        profile_y = img.sum(axis=0)
+        fwhm_x = self._profile_fwhm(profile_x, self.x_bin_centers)
+        fwhm_y = self._profile_fwhm(profile_y, self.y_bin_centers)
         return np.array([fwhm_x, fwhm_y])
 
     @staticmethod
@@ -278,16 +361,19 @@ class Histogram2DAnalyzer:
         return theta_wrapped
 
     def parameters_from_projections(self):
-        """Compute beam parameters from projections automatically.
+        """Compute a quick beam estimate from marginal projections.
 
-        Sets self.beam_visible and self.hprm_project if the beam is visible.
+        Sets ``self.beam_visible``, ``self.hprm_project`` and the
+        projection-derived ROI. The ROI is then refined with one or more
+        moment-based passes so that tilted or slightly non-Gaussian beams
+        are not truncated.
 
-        Args:
-            img: optional array to analyze instead of self.img
-                (e.g. self.img_thresholded).
+        The returned amplitude and offset are peak values per unit bin
+        area (the histogram counts divided by ``self.bin_area``).
 
         Returns:
-            dict or None: hprm_qck if visible, None otherwise.
+            dict or None: projection parameters if the beam is visible,
+                otherwise None.
         """
         if self.img.ndim != 2:
             raise ValueError("img must be a 2D array.")
@@ -309,8 +395,13 @@ class Histogram2DAnalyzer:
             return None
 
         fwhms = self._fwhm_from_projection(cx, cy)
-        sigx  = self.fwhm_to_sigma(fwhms[0])
-        sigy  = self.fwhm_to_sigma(fwhms[1])
+        sigx = self.fwhm_to_sigma(fwhms[0])
+        sigy = self.fwhm_to_sigma(fwhms[1])
+        if not np.isfinite(sigx) or sigx <= 0:
+            sigx = self.x_bin_size
+        if not np.isfinite(sigy) or sigy <= 0:
+            sigy = self.y_bin_size
+
         self.hprm_project = {
             "mux"       : cx,
             "muy"       : cy,
@@ -318,44 +409,64 @@ class Histogram2DAnalyzer:
             "sigy"      : sigy,
             "fwhmx"     : fwhms[0],
             "fwhmy"     : fwhms[1],
-            # no cov. in quick estimate
+            # no covariance in the projection estimate
             "cov"       : np.diag([sigx**2, sigy**2]),
             "sig_major" : max(sigx, sigy),
             "sig_minor" : min(sigx, sigy),
-            # ellipse aligned to axes
-            "theta"     : 0.5*np.pi*float(sigx < sigy),
-            "amplitude" : self._amplitude_estimate(),
-            "threshold" : np.min(self.img),
-            # identity for quick estimate
-            "evecs"     : np.array([[1, 0], [0, 1]]),
+            # ellipse aligned to the axes
+            "theta"     : 0.5 * np.pi * float(sigx < sigy),
+            "amplitude" : 0.0,   # filled below, per unit bin area
+            "offset"    : 0.0,   # filled below, per unit bin area
+            # identity for the quick estimate
+            "evecs"     : np.array([[1.0, 0.0], [0.0, 1.0]]),
             "x_bin_centers"  : self.x_bin_centers,
             "y_bin_centers"  : self.y_bin_centers,
-
         }
+
+        # Build the projection ROI, then refine it using moments. The
+        # refinement fixes the common case where the projection width is
+        # slightly small (tilted beams, non-Gaussian tails).
         self.compute_roi()
+        self._refine_roi_from_moments(self.img)
+
+        offset_counts, amplitude_counts = self._gaussian_linear_estimate(
+            self.img, self.hprm_project, useroi=True
+        )
+        self.hprm_project["amplitude"] = amplitude_counts / self.bin_area
+        self.hprm_project["offset"] = offset_counts / self.bin_area
         return self.hprm_project
 
-    def compute_roi(self):
-        """Rebuild the projection-derived rectangular ROI.
+    def _roi_from_params(self, hprm):
+        """Set the rectangular ROI mask and bounds from Gaussian parameters.
 
-        Uses the projection centroid and sigmas from self.hprm_project,
-        with half-width self.roi_sigma * sigma on each axis. Stores the
-        boolean mask in self.roi_mask and plotting bounds in self.roi_bounds.
+        Args:
+            hprm: dict containing at least ``mux``, ``muy``, ``sigx`` and
+                ``sigy`` in bin-edge coordinate units.
 
         Returns:
-            np.ndarray or None: the boolean ROI mask, or None when the
-                projection parameters are unavailable.
+            np.ndarray: boolean ROI mask.
         """
-        self.roi_mask = None
-        self.roi_bounds = None
-        if self.hprm_project is None:
-            return None
+        x0 = (hprm["mux"] - self.roi_sigma * hprm["sigx"]
+              - self.roi_pad * self.x_bin_size)
+        x1 = (hprm["mux"] + self.roi_sigma * hprm["sigx"]
+              + self.roi_pad * self.x_bin_size)
+        y0 = (hprm["muy"] - self.roi_sigma * hprm["sigy"]
+              - self.roi_pad * self.y_bin_size)
+        y1 = (hprm["muy"] + self.roi_sigma * hprm["sigy"]
+              + self.roi_pad * self.y_bin_size)
 
-        hprm = self.hprm_project
-        x0 = hprm["mux"] - self.roi_sigma * hprm["sigx"]
-        x1 = hprm["mux"] + self.roi_sigma * hprm["sigx"]
-        y0 = hprm["muy"] - self.roi_sigma * hprm["sigy"]
-        y1 = hprm["muy"] + self.roi_sigma * hprm["sigy"]
+        xlo, xhi = float(self.x_bin_edges[0]), float(self.x_bin_edges[-1])
+        ylo, yhi = float(self.y_bin_edges[0]), float(self.y_bin_edges[-1])
+        x0 = max(xlo, min(x0, xhi))
+        x1 = max(xlo, min(x1, xhi))
+        y0 = max(ylo, min(y0, yhi))
+        y1 = max(ylo, min(y1, yhi))
+
+        # Allow a one-bin ROI at an image edge, but never an empty span.
+        if not x1 > x0:
+            x0, x1 = xlo, xhi
+        if not y1 > y0:
+            y0, y1 = ylo, yhi
 
         xg, yg = np.meshgrid(self.x_bin_centers, self.y_bin_centers,
                              indexing="ij")
@@ -364,18 +475,89 @@ class Histogram2DAnalyzer:
             (yg >= y0) & (yg <= y1)
         )
         if not np.any(roi_mask):
-            raise ValueError(
-                "ROI does not contain any bin centers; increase roi_sigma."
-            )
+            # Fall back to the full image rather than raising from deep in
+            # the analysis pipeline.
+            roi_mask = np.ones(self.img.shape, dtype=bool)
+            x0, x1 = xlo, xhi
+            y0, y1 = ylo, yhi
 
         self.roi_mask = roi_mask
-        self.roi_bounds = (
-            max(float(self.x_bin_edges[0]), x0),
-            min(float(self.x_bin_edges[-1]), x1),
-            max(float(self.y_bin_edges[0]), y0),
-            min(float(self.y_bin_edges[-1]), y1),
-        )
+        self.roi_bounds = (x0, x1, y0, y1)
+        return roi_mask
+
+    def _refine_roi_from_moments(self, img, max_iter=ROI_REFINE_ITERATIONS):
+        """Refine the ROI using weighted moments until it stabilises.
+
+        The projection estimate can be slightly narrow for tilted or
+        non-Gaussian beams. A moment estimate made inside the current ROI is
+        less sensitive to that, so the ROI is rebuilt from it. Iteration
+        stops when the bounds change by less than a small fraction of a bin.
+
+        Args:
+            img: 2D image used for the moment calculation.
+            max_iter: maximum number of refinement passes.
+
+        Returns:
+            np.ndarray or None: the final ROI mask, or None if it could not
+                be refined.
+        """
+        if self.roi_mask is None:
+            return None
+
+        img = np.asarray(img, dtype=float)
+        if img.shape != self.img.shape:
+            raise ValueError("img must have the same shape as self.img.")
+
+        scale = max(self.x_bin_size, self.y_bin_size)
+        for _ in range(max(0, int(max_iter))):
+            (mux, muy), covmat = self._covariance_from_moments(
+                img, useroi=True
+            )
+            if covmat is None:
+                break
+            sigx = float(np.sqrt(covmat[0, 0]))
+            sigy = float(np.sqrt(covmat[1, 1]))
+            if (not np.isfinite(sigx) or not np.isfinite(sigy)
+                    or sigx <= 0 or sigy <= 0):
+                break
+
+            old_bounds = self.roi_bounds
+            self._roi_from_params({
+                "mux": float(mux),
+                "muy": float(muy),
+                "sigx": sigx,
+                "sigy": sigy,
+            })
+            if old_bounds is not None and self.roi_bounds is not None:
+                change = max(
+                    abs(a - b) for a, b in zip(old_bounds, self.roi_bounds)
+                )
+                if change <= 0.05 * scale:
+                    break
         return self.roi_mask
+
+    def compute_roi(self, hprm=None):
+        """Rebuild the rectangular ROI from projection parameters.
+
+        Uses the centroid and sigmas from ``hprm`` (or
+        ``self.hprm_project``), with half-width
+        ``roi_sigma * sigma + roi_pad`` on each axis. Stores the boolean mask
+        in ``self.roi_mask`` and plotting bounds in ``self.roi_bounds``.
+
+        Args:
+            hprm: optional parameter dict used to define the ROI.
+
+        Returns:
+            np.ndarray or None: the boolean ROI mask, or None when no
+                parameters are available.
+        """
+        self.roi_mask = None
+        self.roi_bounds = None
+        if hprm is None:
+            hprm = self.hprm_project
+        if hprm is None:
+            return None
+        return self._roi_from_params(hprm)
 
     def analyze(self, mode='all', warn=True):
         """Run analysis pipeline.
@@ -463,6 +645,7 @@ class Histogram2DAnalyzer:
         mean=DEFAULT_MEAN,
         cov=DEFAULT_COV,
         hist_range=DEFAULT_HIST_RANGE,
+        seed=None,
     ):
         """Create an analyzer from a randomly sampled Gaussian distribution.
 
@@ -473,11 +656,12 @@ class Histogram2DAnalyzer:
             mean: 2-element mean vector.
             cov: 2x2 covariance matrix.
             hist_range: [[xmin, xmax], [ymin, ymax]] histogram range.
+            seed: optional random seed for reproducible histograms.
 
         Returns:
             Histogram2DAnalyzer instance.
         """
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(seed)
         samples = rng.multivariate_normal(mean=mean, cov=cov, size=size)
         hist, x_bin_edges, y_bin_edges = np.histogram2d(
             samples[:, 0], samples[:, 1], bins=bins, range=hist_range
@@ -488,14 +672,15 @@ class Histogram2DAnalyzer:
     # Preprocessing.
     # ------------------------------------------------------------------
 
-    def add_noise(self, noisetype="poisson", level=None):
+    def add_noise(self, noisetype="poisson", level=None, seed=None):
         """Add noise to self.img in-place.
 
         Arguments:
             noisetype: 'poisson' (default) or 'gaussian'.
             level: noise scale; defaults to self.img for Poisson.
+            seed: optional random seed for reproducible noise.
         """
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(seed)
         if noisetype not in ("poisson", "gaussian"):
             raise ValueError("noisetype must be 'poisson' or 'gaussian'.")
         if noisetype == "poisson":
@@ -540,8 +725,15 @@ class Histogram2DAnalyzer:
         self.y_bin_edges = validate_edges(y_bin_edges, self.img.shape[1], "y")
         self.x_bin_centers = 0.5 * (self.x_bin_edges[:-1] + self.x_bin_edges[1:])
         self.y_bin_centers = 0.5 * (self.y_bin_edges[:-1] + self.y_bin_edges[1:])
-        self.x_bin_width = float(self.x_bin_edges[1] - self.x_bin_edges[0])
-        self.y_bin_width = float(self.y_bin_edges[1] - self.y_bin_edges[0])
+        # Physical size of one bin. Amplitude-like results (peak height and
+        # background) are reported per unit bin area so that they do not
+        # change when the histogram is rebinned.
+        self.x_bin_size = float(self.x_bin_edges[1] - self.x_bin_edges[0])
+        self.y_bin_size = float(self.y_bin_edges[1] - self.y_bin_edges[0])
+        self.bin_area = self.x_bin_size * self.y_bin_size
+        # Backwards-compatible aliases.
+        self.x_bin_width = self.x_bin_size
+        self.y_bin_width = self.y_bin_size
 
     def _nearest_bin_index(self, coordinate, axis):
         """Map a physical/bin coordinate to the nearest bin-center index."""
@@ -617,23 +809,36 @@ class Histogram2DAnalyzer:
         return sig_major, sig_minor, theta, evecs
 
     @staticmethod
-    def _gaussian_2d(coords, thresh, amplitude, mux, muy, sigx, sigy, covxy):
-        """Evaluate a normalized 2D Gaussian at coords = (x, y).
+    def _gaussian_2d(coords, offset, amplitude, mux, muy, sigx, sigy, rho):
+        """Evaluate a 2D Gaussian with a constant offset.
+
+        The model is evaluated in histogram units (counts per bin). The
+        returned amplitude/offset are therefore also in counts per bin and
+        must be divided by the bin area before being exposed to the user.
+
+        The covariance is parameterised by the correlation coefficient
+        ``rho`` instead of the raw covariance ``covxy``:
+
+            covxy = rho * sigx * sigy
+
+        Bounding ``rho`` to (-1, 1) guarantees a positive-definite
+        covariance matrix, which the raw covariance parameter cannot.
 
         Arguments:
-            coords : tuple (x, y) of coordinate arrays.
-            thresh : threshold value.
-            amplitude : peak amplitude.
-            mux    : mean in x.
-            muy    : mean in y.
-            sigx   : standard deviation in x.
-            sigy   : standard deviation in y.
-            covxy  : covariance between x and y.
+            coords: tuple (x, y) of coordinate arrays.
+            offset: constant background level.
+            amplitude: peak height above the offset.
+            mux: mean in x.
+            muy: mean in y.
+            sigx: standard deviation in x.
+            sigy: standard deviation in y.
+            rho: correlation coefficient, -1 < rho < 1.
 
         Returns:
             Gaussian values at the given coordinates.
         """
         x, y = coords
+        covxy = rho * sigx * sigy
         cov = np.array([[sigx**2, covxy], [covxy, sigy**2]])
         inv_cov = np.linalg.inv(cov)
         dx = x - mux
@@ -643,9 +848,7 @@ class Histogram2DAnalyzer:
             + 2 * inv_cov[0, 1] * dx * dy
             + inv_cov[1, 1] * dy**2
         )
-        # norm = 1.0 / (2 * np.pi * np.sqrt(np.linalg.det(cov)))
-        # return thresh + amplitude * norm * np.exp(exponent)
-        return thresh + amplitude * np.exp(exponent)
+        return offset + amplitude * np.exp(exponent)
 
     def _number_of_bins(self, data=None) -> int:
         """Return a bin count for threshold analysis.
@@ -689,8 +892,109 @@ class Histogram2DAnalyzer:
     # Public pipeline methods.
     # ------------------------------------------------------------------
 
+    def _gaussian_linear_estimate(self, img=None, hprm=None, useroi=True):
+        """Estimate offset and peak amplitude with a matched filter.
+
+        The Gaussian centroid and covariance are held fixed from ``hprm``;
+        only the constant offset and the amplitude are fitted. This makes
+        the problem linear and uses every ROI pixel rather than a single
+        noisy maximum or a box average. The result is a good starting point
+        for the full nonlinear fit.
+
+        Args:
+            img: 2D array of counts per bin. Defaults to ``self.img``.
+            hprm: parameter dict providing ``mux``, ``muy`` and either
+                ``cov`` or ``sigx``/``sigy``. Defaults to
+                ``self.hprm_project``.
+            useroi: if True, use the current ROI mask when available.
+
+        Returns:
+            tuple: ``(offset_counts, amplitude_counts)`` in counts per bin.
+        """
+        img = self.img if img is None else np.asarray(img, dtype=float)
+        if img.shape != self.img.shape:
+            raise ValueError("img must have the same shape as self.img.")
+        if hprm is None:
+            hprm = self.hprm_project
+        if hprm is None:
+            # Without a shape estimate, a robust background and maximum are
+            # better than failing the whole analysis.
+            offset = float(np.median(img))
+            amplitude = float(np.max(img) - offset)
+            if img.min() >= 0:
+                offset = max(0.0, offset)
+                amplitude = max(0.0, amplitude)
+            return offset, amplitude
+
+        if "cov" in hprm and hprm["cov"] is not None:
+            cov = np.asarray(hprm["cov"], dtype=float)
+        else:
+            cov = np.diag([hprm["sigx"] ** 2, hprm["sigy"] ** 2])
+        if (cov.shape != (2, 2) or not np.all(np.isfinite(cov))
+                or cov[0, 0] <= 0 or cov[1, 1] <= 0
+                or np.linalg.det(cov) <= 0):
+            cov = np.diag([
+                max(hprm["sigx"] ** 2, self.x_bin_size ** 2),
+                max(hprm["sigy"] ** 2, self.y_bin_size ** 2),
+            ])
+
+        xg, yg = np.meshgrid(self.x_bin_centers, self.y_bin_centers,
+                             indexing="ij")
+        if useroi and self.roi_mask is not None:
+            if self.roi_mask.shape != img.shape:
+                raise ValueError("ROI mask shape must match img shape.")
+            mask = self.roi_mask
+        else:
+            mask = np.ones(img.shape, dtype=bool)
+
+        inv_cov = np.linalg.inv(cov)
+        dx = xg - hprm["mux"]
+        dy = yg - hprm["muy"]
+        shape = np.exp(-0.5 * (
+            inv_cov[0, 0] * dx**2
+            + 2 * inv_cov[0, 1] * dx * dy
+            + inv_cov[1, 1] * dy**2
+        ))
+
+        design = np.column_stack([np.ones(mask.sum()), shape[mask]])
+        values = img[mask]
+        if values.size < 2:
+            offset = float(values[0]) if values.size else 0.0
+            return offset, 0.0
+
+        coefficients, _, _, _ = np.linalg.lstsq(design, values, rcond=None)
+        offset, amplitude = (float(coefficients[0]),
+                             float(coefficients[1]))
+        if img.min() >= 0:
+            offset = max(0.0, offset)
+            amplitude = max(0.0, amplitude)
+        return offset, amplitude
+
+    def _amplitude_estimate(self, img=None, droi=4):
+        """Return a peak-amplitude estimate per unit bin area.
+
+        This compatibility wrapper now uses the matched-filter estimate
+        instead of the old local box mean. ``droi`` is retained for API
+        compatibility but is no longer used.
+
+        Args:
+            img: optional 2D array of counts per bin.
+            droi: ignored; kept for backwards compatibility.
+
+        Returns:
+            float: peak amplitude in counts per unit bin area.
+        """
+        del droi
+        _, amplitude_counts = self._gaussian_linear_estimate(
+            img, self.hprm_project, useroi=True
+        )
+        return amplitude_counts / self.bin_area
+
     def compute_momenta(self, img=None, useroi=True):
         """Compute weighted moments in the bin-edge coordinate units.
+
+        The returned amplitude and offset are peak values per unit bin
+        area, i.e. the counts-per-bin estimate divided by ``self.bin_area``.
 
         Arguments:
             img: optional array to analyse instead of self.img
@@ -698,15 +1002,16 @@ class Histogram2DAnalyzer:
             useroi: if True, use the projection-derived rectangular ROI.
 
         Returns:
-            hprm: dictionary with centroid, sigma, and covariance in the
-                bin-edge coordinate units; also stored in self.hprm.
+            hprm: dictionary with centroid, sigma, covariance, amplitude and
+                offset in the bin-edge coordinate system; also stored in
+                ``self.hprm_momenta``.
         """
         if not self.beam_visible:
             import warnings
             warnings.warn("Beam not visible; skipping momenta analysis.",
                           stacklevel=2)
             return None
-        
+
         img = self.img if img is None else np.asarray(img, dtype=float)
         if img.ndim != 2:
             raise ValueError("img must be a 2D array.")
@@ -715,13 +1020,34 @@ class Histogram2DAnalyzer:
             raise ValueError("x_bin_edges length must be img.shape[0] + 1.")
         if self.y_bin_edges.size != ny + 1:
             raise ValueError("y_bin_edges length must be img.shape[1] + 1.")
-        
-        (mux, muy), covmat = self._covariance_from_moments(img, useroi=useroi)
-        sigx = np.sqrt(covmat[0, 0])
-        sigy = np.sqrt(covmat[1, 1])
+
+        (mux, muy), covmat = self._covariance_from_moments(
+            img, useroi=useroi
+        )
+        if covmat is None or mux is None or muy is None:
+            import warnings
+            warnings.warn(
+                "Moment calculation failed; image has no positive weight.",
+                stacklevel=2,
+            )
+            return None
+
+        sigx = float(np.sqrt(covmat[0, 0]))
+        sigy = float(np.sqrt(covmat[1, 1]))
         sig_major, sig_minor, theta, evecs = self._ellipse_params_from_cov(
             covmat
-            )
+        )
+
+        shape_hprm = {
+            "mux": float(mux),
+            "muy": float(muy),
+            "cov": covmat,
+            "sigx": sigx,
+            "sigy": sigy,
+        }
+        offset_counts, amplitude_counts = self._gaussian_linear_estimate(
+            img, shape_hprm, useroi=useroi
+        )
 
         self.hprm_momenta = {
             "mux"           : mux,
@@ -735,43 +1061,99 @@ class Histogram2DAnalyzer:
             "sig_minor"     : sig_minor,
             "theta"         : self.adjust_angle(theta),
             "evecs"         : evecs,
-            "amplitude"     : self._amplitude_estimate(img, self.droi),
-            "threshold"     : np.min(img),
+            "amplitude"     : amplitude_counts / self.bin_area,
+            "offset"        : offset_counts / self.bin_area,
             "x_bin_centers" : self.x_bin_centers,
             "y_bin_centers" : self.y_bin_centers,
         }
         return self.hprm_momenta
 
-    def _amplitude_estimate(self, img = None, droi=4):
-        """Estimate amplitude for Gaussian fitting.
+    @staticmethod
+    def _robust_background(img):
+        """Estimate a constant background and its robust scatter.
 
-        Arguments:
-            img: 2D array to analyze.
-            droi: nonnegative integer radius of the local ROI in bins.
+        The median is used instead of the mean so that the beam itself does
+        not bias the estimate. The scatter is the scaled median absolute
+        deviation, which is insensitive to a small number of bright bins.
+
+        Args:
+            img: 2D array of counts per bin.
 
         Returns:
-            Estimated amplitude value.
+            tuple: ``(background, scatter)`` in counts per bin.
         """
-        img = self.img if img is None else np.asarray(img)
-        if not isinstance(droi, (int, np.integer)) or droi < 0:
-            raise ValueError("droi must be a nonnegative integer number of bins.")
-        cx, cy = self._centroid_from_projection()
-        ix = self._nearest_bin_index(cx, "x")
-        iy = self._nearest_bin_index(cy, "y")
-        roi = img[
-            max(0, ix - droi):min(img.shape[0], ix + droi + 1),
-            max(0, iy - droi):min(img.shape[1], iy + droi + 1),
-        ]
-        return float(np.mean(roi))
+        values = np.asarray(img, dtype=float).ravel()
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            return 0.0, 0.0
+        median = float(np.median(values))
+        mad = float(np.median(np.abs(values - median)))
+        return median, 1.4826 * mad
+
+    @staticmethod
+    def _propagate_uncertainties(func, params, pcov, rel_step=1e-6):
+        """Propagate a covariance matrix through derived quantities.
+
+        A numerical Jacobian of ``func`` is formed with central
+        differences, and the output covariance is ``J pcov J^T``. This
+        lets the caller report uncertainties for quantities that are not
+        fit parameters directly (FWHM, covariance elements, principal
+        sigmas, angle).
+
+        Args:
+            func: callable mapping the parameter vector to a 1D array.
+            params: parameter vector at which to evaluate the Jacobian.
+            pcov: parameter covariance matrix from ``curve_fit``.
+            rel_step: relative finite-difference step.
+
+        Returns:
+            tuple: ``(values, errors)`` as 1D arrays. Errors are NaN when
+                ``pcov`` is unavailable or not finite.
+        """
+        params = np.asarray(params, dtype=float)
+        values = np.atleast_1d(np.asarray(func(params), dtype=float))
+        jacobian = np.zeros((values.size, params.size), dtype=float)
+        for i in range(params.size):
+            step = rel_step * max(abs(params[i]), 1.0)
+            plus = params.copy()
+            minus = params.copy()
+            plus[i] += step
+            minus[i] -= step
+            jacobian[:, i] = (
+                np.atleast_1d(func(plus)) - np.atleast_1d(func(minus))
+            ) / (2.0 * step)
+
+        if pcov is None or not np.all(np.isfinite(pcov)):
+            return values, np.full(values.shape, np.nan)
+        derived_cov = jacobian @ pcov @ jacobian.T
+        errors = np.sqrt(np.clip(np.diag(derived_cov), 0.0, None))
+        return values, errors
 
     def fit(self, hprm=None, img=None, useroi=True):
         """Fit a 2D Gaussian using the bin-edge coordinate system.
 
-        Uses hprm (or self.hprm, or freshly computed moments) as the
-        initial parameter guess.
+        The model is fitted in counts per bin, but the returned amplitude
+        and offset are peak values per unit bin area. The initial estimate
+        from ``hprm`` is multiplied by ``self.bin_area`` before fitting and
+        the fitted values are divided by it again.
+
+        The fit is bounded and correlation-parameterised:
+
+            offset in [0, background + OFFSET_UPPER_NSIGMA * sigma]
+            amplitude in [0, AMPLITUDE_MAX_FACTOR * brightest bin]
+            mux, muy within the image edges
+            sigx, sigy >= SIGMA_MIN_BINS bins and <= the image span
+            rho in [-RHO_MAX, RHO_MAX]
+
+        Poisson weights ``sigma = sqrt(max(counts, 1))`` are used with
+        ``absolute_sigma=True``, so the returned ``pcov`` gives absolute
+        parameter uncertainties. If the weighted fit fails, an unweighted
+        fit is attempted as a fallback and the result is flagged with
+        ``weighted=False``.
 
         Arguments:
-            hprm: optional pre-computed moments dict.
+            hprm: optional pre-computed moments dict. Defaults to
+                ``self.hprm_project``.
             img: optional counts-per-bin array to fit instead of self.img
                 (e.g. self.img_thresholded); must have the same shape.
             useroi: if True, fit within the projection-derived rectangular
@@ -779,7 +1161,11 @@ class Histogram2DAnalyzer:
                 used for the initial parameter guess.
 
         Returns:
-            hprm: fitted parameters dictionary; also stored in self.hprm.
+            hprm: fitted parameters dictionary; also stored in
+                ``self.hprm_fitting``. It includes an ``errors`` dict with
+                the uncertainty of every parameter and derived quantity,
+                plus ``rho``, ``pcov``, ``chi2``, ``dof``,
+                ``reduced_chi2`` and ``weighted`` when available.
         """
         if not self.beam_visible:
             return None
@@ -801,54 +1187,240 @@ class Histogram2DAnalyzer:
                              indexing="ij")
 
         # Fit to ROI.
-        img_opt = img.copy()
         if useroi:
+            if self.roi_mask is None:
+                self.compute_roi(hprm)
             if self.roi_mask is None:
                 raise ValueError(
                     "ROI is not available; run compute_roi() first."
                 )
-            xg = xg[self.roi_mask]
-            yg = yg[self.roi_mask]
-            img_opt = img[self.roi_mask]
+            roi_mask = self.roi_mask
+        else:
+            roi_mask = np.ones(img.shape, dtype=bool)
 
-        p0 = [
-            hprm['threshold'],  # threshold    
-            hprm['amplitude'],  # peak    
-            hprm["mux"],
-            hprm["muy"],
-            hprm["sigx"],
-            hprm["sigy"],
-            hprm["cov"][0, 1],
-        ]
+        x_opt = xg[roi_mask]
+        y_opt = yg[roi_mask]
+        img_opt = img[roi_mask]
 
-        img_opt = img_opt.ravel()
+        # Drop non-finite bins; a single NaN would otherwise poison the fit.
+        finite = (np.isfinite(x_opt) & np.isfinite(y_opt)
+                  & np.isfinite(img_opt))
+        x_opt = x_opt[finite]
+        y_opt = y_opt[finite]
+        img_opt = img_opt[finite]
+        if img_opt.size < 8:
+            raise ValueError(
+                "Not enough finite bins in the ROI to constrain the fit."
+            )
 
-        popt, covfit = curve_fit(
-            self._gaussian_2d,
-            (xg.ravel(), yg.ravel()),
-            img_opt,
-            p0,
+        # --- Initial guess. hprm values are densities; convert back to
+        # --- counts per bin for the fit model.
+        p0_offset = float(hprm.get("offset", 0.0)) * self.bin_area
+        p0_amplitude = float(hprm.get("amplitude", 0.0)) * self.bin_area
+        if not np.isfinite(p0_offset):
+            p0_offset = float(np.median(img_opt))
+        if not np.isfinite(p0_amplitude) or p0_amplitude <= 0:
+            p0_amplitude = max(
+                0.0, float(np.max(img_opt)) - p0_offset
+            )
+
+        cov0 = np.asarray(hprm.get("cov", np.diag(
+            [hprm["sigx"] ** 2, hprm["sigy"] ** 2]
+        )), dtype=float)
+        sigx0 = float(hprm["sigx"])
+        sigy0 = float(hprm["sigy"])
+        rho0 = 0.0
+        if cov0.shape == (2, 2) and sigx0 > 0 and sigy0 > 0:
+            rho0 = float(cov0[0, 1] / (sigx0 * sigy0))
+        if not np.isfinite(rho0):
+            rho0 = 0.0
+        rho0 = float(np.clip(rho0, -RHO_MAX, RHO_MAX))
+
+        p0 = np.array([
+            p0_offset,
+            p0_amplitude,
+            float(hprm["mux"]),
+            float(hprm["muy"]),
+            sigx0,
+            sigy0,
+            rho0,
+        ], dtype=float)
+
+        # --- Bounds. The offset upper limit is tied to the robust
+        # --- background so the baseline cannot absorb the beam. The
+        # --- amplitude limit protects against a runaway peak.
+        background, background_scatter = self._robust_background(img)
+        offset_lower = min(0.0, float(np.min(img_opt)))
+        offset_upper = max(
+            p0_offset,
+            background + OFFSET_UPPER_NSIGMA * max(
+                background_scatter, np.sqrt(max(background, 1.0))
+            ),
+        ) + 1.0
+        if offset_upper <= offset_lower:
+            offset_upper = offset_lower + 1.0
+
+        amplitude_lower = min(0.0, float(np.max(img_opt)))
+        amplitude_upper = AMPLITUDE_MAX_FACTOR * max(
+            float(np.max(img_opt)), p0_amplitude, 1.0
         )
+        if amplitude_upper <= amplitude_lower:
+            amplitude_upper = amplitude_lower + 1.0
 
-        sx, sy, sxy = popt[4], popt[5], popt[6]
-        covmat = np.array([[sx**2, sxy], [sxy, sy**2]])
+        x_span = float(self.x_bin_edges[-1] - self.x_bin_edges[0])
+        y_span = float(self.y_bin_edges[-1] - self.y_bin_edges[0])
+        sigx_lower = SIGMA_MIN_BINS * self.x_bin_size
+        sigy_lower = SIGMA_MIN_BINS * self.y_bin_size
+        sigx_upper = max(x_span, 4.0 * abs(sigx0), sigx_lower * 2.0)
+        sigy_upper = max(y_span, 4.0 * abs(sigy0), sigy_lower * 2.0)
+
+        lower = np.array([
+            offset_lower,
+            amplitude_lower,
+            float(self.x_bin_edges[0]),
+            float(self.y_bin_edges[0]),
+            sigx_lower,
+            sigy_lower,
+            -RHO_MAX,
+        ])
+        upper = np.array([
+            offset_upper,
+            amplitude_upper,
+            float(self.x_bin_edges[-1]),
+            float(self.y_bin_edges[-1]),
+            sigx_upper,
+            sigy_upper,
+            RHO_MAX,
+        ])
+
+        # Keep p0 strictly inside the bounds.
+        eps = 1e-9 * np.maximum(1.0, np.abs(upper - lower))
+        p0 = np.clip(p0, lower + eps, upper - eps)
+
+        # --- Poisson-weighted fit. Bins with zero counts get sigma=1 to
+        # --- keep the weight finite.
+        weights = np.sqrt(np.maximum(img_opt, 1.0))
+        weighted = True
+        try:
+            popt, pcov = curve_fit(
+                self._gaussian_2d,
+                (x_opt, y_opt),
+                img_opt,
+                p0=p0,
+                sigma=weights,
+                absolute_sigma=True,
+                bounds=(lower, upper),
+                maxfev=FIT_MAXFEV,
+                method="trf",
+            )
+        except (RuntimeError, ValueError):
+            # Fall back to an unweighted fit. This loses the absolute
+            # Poisson interpretation of pcov but still yields a result for
+            # unusual or nearly empty ROIs.
+            weighted = False
+            popt, pcov = curve_fit(
+                self._gaussian_2d,
+                (x_opt, y_opt),
+                img_opt,
+                p0=p0,
+                bounds=(lower, upper),
+                maxfev=FIT_MAXFEV,
+                method="trf",
+            )
+
+        offset, amplitude, mux, muy, sigx, sigy, rho = popt
+        covxy = rho * sigx * sigy
+        covmat = np.array([[sigx**2, covxy], [covxy, sigy**2]])
         (sig_major, sig_minor,
          theta, evecs) = self._ellipse_params_from_cov(covmat)
 
+        # --- Parameter uncertainties from pcov.
+        if pcov is None or not np.all(np.isfinite(pcov)):
+            perr = np.full(popt.shape, np.nan)
+        else:
+            perr = np.sqrt(np.clip(np.diag(pcov), 0.0, None))
+
+        # Derived quantities are propagated numerically through pcov. The
+        # angle and principal sigmas are written with a continuous formula
+        # for a 2x2 covariance so that finite differences do not suffer
+        # from eigenvector sign flips.
+        def derived(values):
+            (_, amp, _, _, sx, sy, r) = values
+            cxy = r * sx * sy
+            trace = sx**2 + sy**2
+            disc = np.sqrt(
+                max((sx**2 - sy**2) ** 2 + 4.0 * cxy**2, 0.0)
+            )
+            major = np.sqrt(max(0.5 * (trace + disc), 0.0))
+            minor = np.sqrt(max(0.5 * (trace - disc), 0.0))
+            angle = 0.5 * np.arctan2(2.0 * cxy, sx**2 - sy**2)
+            return np.array([
+                amp / self.bin_area,       # 0 amplitude
+                values[0] / self.bin_area,  # 1 offset
+                self.sigma_to_fwhm(sx),    # 2 fwhmx
+                self.sigma_to_fwhm(sy),    # 3 fwhmy
+                sx**2,                     # 4 cov_xx
+                cxy,                       # 5 cov_xy
+                sy**2,                     # 6 cov_yy
+                major,                     # 7 sig_major
+                minor,                     # 8 sig_minor
+                angle,                     # 9 theta
+            ])
+
+        _, derived_err = self._propagate_uncertainties(derived, popt, pcov)
+
+        errors = {
+            "offset"    : float(perr[0]),
+            "amplitude" : float(perr[1]),
+            "mux"       : float(perr[2]),
+            "muy"       : float(perr[3]),
+            "sigx"      : float(perr[4]),
+            "sigy"      : float(perr[5]),
+            "rho"       : float(perr[6]),
+            "fwhmx"     : float(derived_err[2]),
+            "fwhmy"     : float(derived_err[3]),
+            "cov_xx"    : float(derived_err[4]),
+            "cov_xy"    : float(derived_err[5]),
+            "cov_yy"    : float(derived_err[6]),
+            "sig_major" : float(derived_err[7]),
+            "sig_minor" : float(derived_err[8]),
+            "theta"     : float(derived_err[9]),
+        }
+
+        # --- Goodness of fit. With Poisson weights and absolute_sigma=True,
+        # --- the reduced chi-square is meaningful for counting data.
+        chi2 = np.nan
+        dof = int(img_opt.size - popt.size)
+        reduced_chi2 = np.nan
+        if weighted:
+            model = self._gaussian_2d((x_opt, y_opt), *popt)
+            chi2 = float(np.sum(
+                ((img_opt - model) / np.sqrt(np.maximum(img_opt, 1.0))) ** 2
+            ))
+            if dof > 0:
+                reduced_chi2 = chi2 / dof
+
         self.hprm_fitting = {
-            "mux"           : popt[2],
-            "muy"           : popt[3],
-            "sigx"          : sx,
-            "sigy"          : sy,
-            "fwhmx"         : self.sigma_to_fwhm(sx),
-            "fwhmy"         : self.sigma_to_fwhm(sy),
+            "mux"           : mux,
+            "muy"           : muy,
+            "sigx"          : sigx,
+            "sigy"          : sigy,
+            "fwhmx"         : self.sigma_to_fwhm(sigx),
+            "fwhmy"         : self.sigma_to_fwhm(sigy),
             "cov"           : covmat,
             "sig_major"     : sig_major,
             "sig_minor"     : sig_minor,
             "theta"         : self.adjust_angle(theta),
             "evecs"         : evecs,
-            "amplitude"     : popt[1],
-            "threshold"     : popt[0],
+            "rho"           : rho,
+            "amplitude"     : amplitude / self.bin_area,
+            "offset"        : offset / self.bin_area,
+            "errors"        : errors,
+            "pcov"          : pcov,
+            "chi2"          : chi2,
+            "dof"           : dof,
+            "reduced_chi2"  : reduced_chi2,
+            "weighted"      : weighted,
             "x_bin_centers" : self.x_bin_centers,
             "y_bin_centers" : self.y_bin_centers,
         }
@@ -907,36 +1479,84 @@ class Histogram2DAnalyzer:
     def print_stats(self, hprm=None):
         """Print parameters from any hprm dict.
 
+        Amplitude and offset are printed per unit bin area, matching the
+        values stored in all parameter dicts. When the dict was produced by
+        :meth:`fit`, each parameter is shown as ``value +/- error`` using
+        the uncertainties propagated from the fit covariance matrix, and
+        the reduced chi-square is reported.
+
         Arguments:
             hprm: optional dict to print; auto-selects from
-                  hprm_qck -> hprm_mom -> hprm_fit.
+                  hprm_fitting -> hprm_momenta -> hprm_project.
         """
         if hprm is None:
-            hprm = self.hprm_project or self.hprm_momenta or self.hprm_fitting
+            hprm = (self.hprm_fitting or self.hprm_momenta
+                    or self.hprm_project)
         if hprm is None:
             print("No parameters computed.")
             return
 
-        print(f"centroid   = ({hprm['mux']:.4e}, {hprm['muy']:.4e})")
-        print(f"sigma x    = {hprm['sigx']:.4e}\nsigma y"
-              f"    = {hprm['sigy']:.4e}")
+        errors = hprm.get("errors") or {}
 
-        if 'fwhmx' in hprm:
-            print(f"fwhm x     = {hprm['fwhmx']:.4e}\nfwhm y"
-                  f"     = {hprm['fwhmy']:.4e}")
+        def fmt(key, spec=".4e"):
+            """Format a value, appending its uncertainty when available."""
+            if key in ("cov_xx", "cov_xy", "cov_yy") and "cov" in hprm:
+                row, col = {"cov_xx": (0, 0), "cov_xy": (0, 1),
+                            "cov_yy": (1, 1)}[key]
+                value = float(np.asarray(hprm["cov"])[row, col])
+            else:
+                value = hprm.get(key)
+            if value is None:
+                return "n/a"
+            text = format(value, spec)
+            err = errors.get(key)
+            if err is not None and np.isfinite(err):
+                text += f" +/- {format(err, spec)}"
+            return text
 
-        if 'cov' not in hprm:
+        print(f"bin size   = ({self.x_bin_size:.4e}, "
+              f"{self.y_bin_size:.4e})")
+        print(f"bin area   = {self.bin_area:.4e}")
+
+        if "offset" in hprm:
+            print(f"offset     = {fmt('offset')}  [counts / bin area]")
+        if "amplitude" in hprm:
+            print(f"amplitude  = {fmt('amplitude')}  [counts / bin area]")
+        if "rho" in hprm:
+            print(f"rho        = {fmt('rho')}")
+        print()
+
+        print(f"centroid   = ({fmt('mux')}, {fmt('muy')})")
+        print(f"sigma x    = {fmt('sigx')}")
+        print(f"sigma y    = {fmt('sigy')}")
+        if "fwhmx" in hprm:
+            print(f"fwhm x     = {fmt('fwhmx')}")
+        if "fwhmy" in hprm:
+            print(f"fwhm y     = {fmt('fwhmy')}")
+
+        if "cov" not in hprm:
             return
 
-        print(f"xy cov     = {hprm['cov'][0, 1]:.4e}\n")
+        print(f"xy cov     = {fmt('cov_xy', '.4e')}")
+        print()
         print(
             "principal sigmas:\n"
-            f"    sigma minor = {hprm['sig_minor']}\n"
-            f"    sigma major = {hprm['sig_major']}\n"
+            f"    sigma minor = {fmt('sig_minor')}\n"
+            f"    sigma major = {fmt('sig_major')}"
         )
         thetadeg = np.degrees(hprm["theta"])
-        print(f"theta = {hprm['theta']:.4e} rad = {thetadeg:.4e} deg\n")
+        theta_err = errors.get("theta")
+        theta_text = f"{thetadeg:.4e} deg"
+        if theta_err is not None and np.isfinite(theta_err):
+            theta_text += f" +/- {np.degrees(theta_err):.4e} deg"
+        print(f"theta = {fmt('theta')} rad = {theta_text}")
         print(f"cov matrix:\n{hprm['cov']}")
+
+        if "reduced_chi2" in hprm and np.isfinite(hprm["reduced_chi2"]):
+            print(
+                f"\nreduced chi2 = {hprm['reduced_chi2']:.4g} "
+                f"(dof = {hprm['dof']})"
+            )
 
     def _render_histogram(self, fig, ax, colorbar=True):
         """Render self.img over its supplied or default bin-edge coordinates.

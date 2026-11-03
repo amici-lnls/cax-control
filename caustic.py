@@ -29,6 +29,8 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     plt = None
 
+_HORIZONTAL_COLOR = 'blue'
+_VERTICAL_COLOR = 'red'
 
 def _safe_float(value, default=np.nan):
     try:
@@ -156,9 +158,9 @@ class CausticAxisResult:
         if ax is None:
             _, ax = plt.subplots(figsize=(8, 4))
         if color is None:
-            color = "C0" if self.axis == "x" else "C1"
+            color = _HORIZONTAL_COLOR if self.axis == "x" else _VERTICAL_COLOR
         if label is None:
-            label = f"{self.axis.upper()} sigma"
+            label = f"$\\sigma_{self.axis.lower()}$"
 
         if show_errorbars:
             ax.errorbar(
@@ -178,10 +180,10 @@ class CausticAxisResult:
 
         if show_fit:
             z = np.linspace(np.min(self.distances), np.max(self.distances), 400)
-            ax.plot(z, self.model(z), "--", color=color, lw=1.5)
+            ax.plot(z, self.model(z), ls="solid", color=color, lw=1.5)
 
-        ax.axvline(self.focus, color=color, linestyle="--", linewidth=1.0,
-                   alpha=0.8, label=f"focus {self.axis.upper()} = {self.focus:.3f}")
+        ax.axvline(self.focus, color=color, linestyle="dotted", linewidth=1.5,
+                   alpha=0.8, label=f"$q_{self.axis.lower()} = {self.focus:.3f}$")
 
         return ax
 
@@ -211,34 +213,50 @@ class CausticResult:
 
     @property
     def astigmatism(self):
-        return abs(self.focus_y - self.focus_x)
+        return self.focus_y - self.focus_x
 
     def model(self, axis, distance):
         axis_results = {"x": self.x, "y": self.y}
         return axis_results[axis].model(distance)
 
-    def plot(self, ax=None, *, show_projection=True):
+    def plot(self, fig=None, ax=None, *, show_projection=True):
         """Overlay x and y caustic profiles and mark the fitted focus positions."""
         if plt is None:
             raise RuntimeError("matplotlib is required for plotting.")
-        if ax is None:
-            _, ax = plt.subplots(figsize=(9, 5))
+        if fig is None and ax is None:
+            fig, ax = plt.subplots(figsize=(9, 5))
+        elif fig is None:
+            fig = ax.figure
 
-        self.x.plot(ax=ax, color="C0", label="x sigma")
-        self.y.plot(ax=ax, color="C1", label="y sigma")
+        # Right axis for the y-axis sigma
+        ax2 = ax.twinx()
+
+        self.x.plot(ax=ax, color=_HORIZONTAL_COLOR, label=None)
+        self.y.plot(ax=ax2, color=_VERTICAL_COLOR, label=None)
 
         if show_projection:
-            ymin, ymax = ax.get_ylim()
-            ax.vlines(self.focus_x, ymin, ymax, colors="C0", linestyles="-.", alpha=0.7)
-            ax.vlines(self.focus_y, ymin, ymax, colors="C1", linestyles="-.", alpha=0.7)
-            ax.vlines(self.focus_midpoint, ymin, ymax, colors="k", linestyles="--", alpha=0.9)
+            # vertical line from caustic minima to 0
+            # ymin_x = np.nanmin(self.x.widths) * 0.9
+            # ymax_x = np.nanmin(self.x.widths) * 1.
+            # ax.vlines(self.focus_x, ymin_x, ymax_x, colors=_HORIZONTAL_COLOR, linestyles="--", alpha=0.7)
+            
+            # ymin_y = np.nanmin(self.y.widths) * 0.9
+            # ymax_y = np.nanmin(self.y.widths) * 1.
+            # ax2.vlines(self.focus_y, ymin_y, ymax_y, colors=_VERTICAL_COLOR, linestyles="--", alpha=0.7)
 
-        ax.set_xlabel("Distance")
-        ax.set_ylabel("Sigma width")
+            _ax = ax if np.nanmin(self.x.widths) < np.nanmin(self.y.widths) else ax2
+            ymin, ymax = _ax.get_ylim()
+            _ax.vlines(self.focus_midpoint, ymin, ymax, colors="k", linestyles="dotted", alpha=0.9,
+                       label=f"midpoint = {self.focus_midpoint:.3f}")
+
+        ax.set_xlabel("Distance $z$ [mm]")
+        ax.set_ylabel("$\\sigma_x$ [μm]")
+        ax2.set_ylabel("$\\sigma_y$ [μm]")
         ax.set_title(f"Astigmatism = {self.astigmatism:.3f}")
-        ax.grid(alpha=0.3)
-        ax.legend()
-        return ax
+        ax.grid(alpha=0.5, color=_HORIZONTAL_COLOR)
+        ax2.grid(alpha=0.5, color=_VERTICAL_COLOR)
+        fig.legend(loc="upper right", bbox_to_anchor=(0.9, 0.9), frameon=True)
+        return fig, ax, ax2
 
 
 def _coerce_measurement(result):

@@ -173,7 +173,7 @@ class CausticAxisResult:
                 color=color,
                 ecolor=color,
                 alpha=0.9,
-                label=label,
+                # label=label,
             )
         else:
             ax.plot(self.distances, self.widths, "o", color=color, label=label)
@@ -184,6 +184,10 @@ class CausticAxisResult:
 
         ax.axvline(self.focus, color=color, linestyle="dotted", linewidth=1.5,
                    alpha=0.8, label=f"$q_{self.axis.lower()} = {self.focus:.3f}$")
+
+        # Color the ax y labels to match the axis color
+        ax.tick_params(axis="y", colors=color)
+        ax.set_ylabel(f"$\\sigma_{self.axis.lower()}$ [μm]", color=color)
 
         return ax
 
@@ -250,12 +254,10 @@ class CausticResult:
                        label=f"midpoint = {self.focus_midpoint:.3f}")
 
         ax.set_xlabel("Distance $z$ [mm]")
-        ax.set_ylabel("$\\sigma_x$ [μm]")
-        ax2.set_ylabel("$\\sigma_y$ [μm]")
         ax.set_title(f"Astigmatism = {self.astigmatism:.3f}")
         ax.grid(alpha=0.5, color=_HORIZONTAL_COLOR)
         ax2.grid(alpha=0.5, color=_VERTICAL_COLOR)
-        fig.legend(loc="upper right", bbox_to_anchor=(0.9, 0.9), frameon=True)
+        fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.85), frameon=True)
         return fig, ax, ax2
 
 

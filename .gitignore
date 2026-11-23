@@ -283,3 +283,7 @@ jobs.??
 
 # sagittal plot data
 pdis.*
+
+# Generated notebook outputs
+figures/
+data/rcds_runs/

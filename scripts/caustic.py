@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover
     ReferenceFrame = None
 
 try:
-    from image_statistics import Histogram2DAnalyzer
+    from scripts.image_statistics import Histogram2DAnalyzer
 except Exception:  # pragma: no cover
     Histogram2DAnalyzer = None
 

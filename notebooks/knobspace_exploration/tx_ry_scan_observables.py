@@ -64,7 +64,7 @@ REPO_ROOT = _find_repo_root(Path.cwd().resolve())
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from caustic import fit_beam_image, image_caustic
+from scripts.caustic import fit_beam_image, image_caustic
 from shadowpy.si_beamlines import CAXSim
 from shadowpy.utils import save_image
 

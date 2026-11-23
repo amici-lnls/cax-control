@@ -19,8 +19,8 @@ import pytest
 sys.path.append(os.path.expanduser("~/repos/cax-control"))
 sys.path.append(os.path.expanduser("~/repos/shadowpy"))
 
-from caustic import fit_caustic_hyperbola
-from image_statistics import FWHM2SIG, Histogram2DAnalyzer
+from scripts.caustic import fit_caustic_hyperbola
+from scripts.image_statistics import FWHM2SIG, Histogram2DAnalyzer
 from shadowpy.utils import Image
 
 

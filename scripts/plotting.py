@@ -324,7 +324,7 @@ def plot_optimization_data(opt, k: int = 1):
     peak_err = np.asarray(opt.observable_errors["peak"])[::k]
     axs[0, 1].errorbar(x, peak, yerr=peak_err, marker="o")
     axs[0, 1].grid(which="both")
-    axs[0, 1].set_ylabel(r"$I ~[\text{count}/\mu m ^2]$")
+    axs[0, 1].set_ylabel(r"$A ~[\text{count}/\mu m ^2]$")
 
     sig_xy = sigx * sigy
     sig_xy_err = np.sqrt((sigx_err / sigx) ** 2 + (sigy_err / sigy) ** 2)
@@ -335,8 +335,8 @@ def plot_optimization_data(opt, k: int = 1):
     f1 = np.asarray(opt.observables["f1"])[::k]
     f1_err = np.asarray(opt.observable_errors["f1"])[::k]
     axs[1, 1].errorbar(x, f1, yerr=f1_err, marker="o")
-    axs[1, 1].grid(which="both")
-    axs[1, 1].set_ylabel(r"$f_1(\sigma_x, \sigma_y, I) ~[\mu m ^4/\text{count}]$")
+    axs[1, 1].grid(which="both", alpha=0.5)
+    axs[1, 1].set_ylabel(r"$f_1(\sigma_x, \sigma_y, A) ~[\mu m ^4/\text{count}]$")
 
     axs[1, 0].set_xlabel("Evaluation")
     axs[1, 1].set_xlabel("Evaluation")

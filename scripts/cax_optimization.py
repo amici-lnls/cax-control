@@ -197,7 +197,8 @@ def compare_conditions(offsets, tilts, z_pos: float, *, image_size=(210, 280)):
     Compare two distinct CAX conditions, e.g. before and after the optimization
     process.
     """
-    beam_props = {}
+    beam_props = []
+    anas       = []
     cax = CAXSim(image_size=image_size)
     for cond, (off, rot) in enumerate(zip(offsets, tilts)):
         
@@ -210,6 +211,10 @@ def compare_conditions(offsets, tilts, z_pos: float, *, image_size=(210, 280)):
         beamr.retrace(z_pos)
         image = image_from_beam(beamr, cax.dvf_B1.frame, image_size=image_size)
         ana = fit_beam_image(image)
+        anas.append(ana)
+        beam_props.append(ana.hprm_fitting)
+
+    return beam_props, anas
 
 
 
